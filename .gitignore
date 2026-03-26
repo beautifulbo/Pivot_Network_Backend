@@ -14,3 +14,4 @@ CCCC/runtime/
 .codex/
 backend/.codex/
 *.sqlite3
+*.sqlite3-*
