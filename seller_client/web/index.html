@@ -531,7 +531,7 @@
         <div>
           <div class="eyebrow">Pivot Compute · Seller Agent</div>
           <h1>本地卖家控制台</h1>
-          <p>这不是一个直接碰 Docker 和 WireGuard 的浏览器壳子，而是 seller-Agent 的本地操作面。页面只做三件事：解释意图、触发动作、把当前节点和平台回显展示清楚。</p>
+          <p>这不是一个直接碰 Docker 和 WireGuard 的浏览器壳子，而是 seller-Agent 的本地操作面。seller 端只负责节点接入、镜像上架/下架、节点与容器资源管理；buyer 如何消费运行时由 buyer client 单独负责。</p>
         </div>
         <div class="hero-side">
           <div class="stat-grid">
@@ -566,7 +566,7 @@
           <div class="panel-head">
             <div>
               <h2>接入编排</h2>
-              <p>先让页面把你的自然语言解释清楚，再决定是否执行 onboarding。</p>
+              <p>先把卖家接入意图解释清楚，再决定是否执行 seller onboarding、节点注册、WireGuard bootstrap 和镜像上架流程。</p>
             </div>
             <div class="chip-row" id="summary_chips"></div>
           </div>
@@ -601,7 +601,7 @@
           <div class="button-row">
             <button class="button-secondary" onclick="runIntentPreview()">预览意图解释</button>
             <button class="button-secondary" onclick="runInstaller()">安装器 Dry Run</button>
-            <button class="button-secondary" onclick="runCodexRuntime()">拉取 CodeX runtime</button>
+            <button class="button-secondary" onclick="runCodexRuntime()">拉取卖家 CodeX runtime</button>
             <button class="button-secondary" onclick="runWireGuardBootstrap()">准备 WireGuard profile</button>
             <button class="button-secondary" onclick="runSwarmEnsureJoined()">确保加入 Swarm</button>
             <button class="button-primary" onclick="runOnboarding()">开始卖家接入</button>
@@ -616,7 +616,7 @@
           <div class="panel-head">
             <div>
               <h2>本地就绪度</h2>
-              <p>这些检查项决定 seller-Agent 现在能做什么，缺什么。</p>
+              <p>这些检查项只回答 seller-Agent 的本机环境是否准备好，不负责 buyer runtime orchestration。</p>
             </div>
           </div>
           <div class="readiness-grid" id="readiness_grid">
@@ -677,14 +677,14 @@
           <div class="panel-head">
             <div>
               <h2>镜像上架</h2>
-              <p>这一块负责调用 seller-Agent 完成 registry trust、推送，并由平台后端自动把镜像发布成 buyer 可见商品。</p>
+              <p>这一块只负责卖家镜像管理：检查 registry HTTPS 入口、完成推送，并由平台后端自动把镜像发布成 buyer 可见商品。</p>
             </div>
           </div>
 
           <div class="form-grid">
             <label>
               Registry
-              <input id="registry" value="81.70.52.75:5000" />
+              <input id="registry" value="pivotcompute.store" />
             </label>
             <label>
               本地镜像 Tag
@@ -701,11 +701,11 @@
           </div>
 
           <div class="button-row">
-            <button class="button-secondary" onclick="configureRegistryTrust()">配置 Registry 信任</button>
+            <button class="button-secondary" onclick="configureRegistryTrust()">检查 Registry 连接</button>
             <button class="button-primary" onclick="runPushImage()">推送并上架镜像</button>
           </div>
           <div class="footer-note" style="margin-top:12px">
-            首次配置 Registry 信任时，Windows 可能弹出证书/信任确认；继续后 seller-Agent 会重启 Docker Desktop，本机 backend、db、redis 可能短暂中断。
+            seller 上传镜像默认走 `https://pivotcompute.store/v2/`，也就是公开证书的 443 入口。镜像名仍然写成 `pivotcompute.store/<repo>:<tag>`，不要写 `https://` 或 `:443`；seller-Agent 这里只做 HTTPS 连通性检查，不再安装本地 CA。
           </div>
         </section>
 
@@ -1102,7 +1102,7 @@
         registry: valueOf("registry"),
         restart_docker: true,
         state_dir: valueOf("state_dir"),
-      }, "registry trust");
+      }, "registry check");
     }
 
     async function runPushImage() {

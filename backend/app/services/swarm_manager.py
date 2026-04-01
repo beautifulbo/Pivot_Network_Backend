@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import base64
 import json
-from textwrap import dedent
 from textwrap import dedent
 
 import paramiko
 
 from app.core.config import Settings
+from app.services.session_gateway_template import build_session_gateway_script
 
 
 class SwarmManagerError(RuntimeError):
@@ -121,6 +120,92 @@ def _exec_script(client: paramiko.SSHClient, script: str) -> dict[str, object]:
     }
 
 
+def _label_args(labels: dict[str, str] | None) -> list[str]:
+    if not labels:
+        return []
+    args: list[str] = []
+    for key, value in labels.items():
+        args.extend(["--label", f"{key}={value}"])
+    return args
+
+
+def _session_gateway_entrypoint(gateway_script: str) -> str:
+    script_body = gateway_script.rstrip() + "\n"
+    return (
+        "set -e\n"
+        "python -m pip install --disable-pip-version-check --no-cache-dir fastapi uvicorn websockets "
+        ">/tmp/pivot-session-gateway-pip.log 2>&1\n"
+        "cat >/tmp/pivot-session-gateway.py <<'PY'\n"
+        f"{script_body}"
+        "PY\n"
+        "python /tmp/pivot-session-gateway.py"
+    )
+
+
+def create_session_gateway_service(
+    settings: Settings,
+    *,
+    service_name: str,
+    placement_constraint: str,
+    gateway_port: int,
+    runtime_service_name: str,
+    session_id: int,
+    buyer_user_id: int,
+    seller_node_id: int,
+    session_token: str,
+    supported_features: list[str] | None = None,
+    labels: dict[str, str] | None = None,
+) -> dict[str, object]:
+    client = _ssh_client(settings)
+    try:
+        gateway_script = build_session_gateway_script()
+        supported_features_env = ",".join(supported_features or [])
+        gateway_entrypoint = _session_gateway_entrypoint(gateway_script)
+        label_args = _label_args(labels)
+        script = dedent(
+            f"""
+            python3 - <<'PY'
+            import json
+            import subprocess
+
+            try:
+                create_command = [
+                    "docker", "service", "create",
+                    "-d",
+                    "--name", {json.dumps(service_name)},
+                    "--constraint", {json.dumps(placement_constraint)},
+                    "--restart-condition", "any",
+                    "--publish", {json.dumps(f"published={gateway_port},target={gateway_port},mode=host")},
+                    "--mount", "type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock",
+                    "--env", {json.dumps(f"PIVOT_SESSION_ID={session_id}")},
+                    "--env", {json.dumps(f"PIVOT_BUYER_USER_ID={buyer_user_id}")},
+                    "--env", {json.dumps(f"PIVOT_SELLER_NODE_ID={seller_node_id}")},
+                    "--env", {json.dumps(f"PIVOT_GATEWAY_PORT={gateway_port}")},
+                    "--env", {json.dumps(f"PIVOT_RUNTIME_SERVICE_NAME={runtime_service_name}")},
+                    "--env", {json.dumps(f"PIVOT_GATEWAY_SERVICE_NAME={service_name}")},
+                    "--env", {json.dumps(f"PIVOT_SESSION_TOKEN={session_token}")},
+                    "--env", {json.dumps(f"PIVOT_SUPPORTED_FEATURES={supported_features_env}")},
+                    *json.loads({json.dumps(json.dumps(label_args))}),
+                    {json.dumps(settings.SESSION_GATEWAY_IMAGE)},
+                    "sh", "-lc", {json.dumps(gateway_entrypoint)},
+                ]
+                subprocess.run(create_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                print(json.dumps({{"ok": True}}))
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr.decode("utf-8", "replace") if exc.stderr else "") or (exc.stdout.decode("utf-8", "replace") if exc.stdout else "") or str(exc)
+                print(json.dumps({{"ok": False, "detail": detail}}))
+                raise
+            PY
+            """
+        )
+        result = _exec_script(client, script)
+        if not result["ok"]:
+            raise SwarmManagerError(f"create_session_gateway_service_failed: {result['stderr'] or result['stdout']}")
+        return result
+    finally:
+        client.close()
+
+
 def create_code_runtime_service(
     settings: Settings,
     *,
@@ -138,12 +223,13 @@ def create_code_runtime_service(
     archive_content_base64: str = "",
     working_dir: str | None = None,
     run_command: list[str] | None = None,
+    labels: dict[str, str] | None = None,
 ) -> dict[str, object]:
     client = _ssh_client(settings)
     try:
         archive_config_name = f"{config_name}-archive"
         archive_target = "/workspace/_payload.zip"
-        code_payload = json.dumps(code_content)
+        _ = archive_filename
         runner_script = dedent(
             """
             import io
@@ -214,6 +300,7 @@ def create_code_runtime_service(
             sys.exit(exit_code)
             """
         ).strip()
+        label_args = _label_args(labels)
         script = dedent(
             f"""
             python3 - <<'PY'
@@ -259,6 +346,7 @@ def create_code_runtime_service(
                     "--env", "PYTHONUNBUFFERED=1",
                     "--env", "PYTHONDONTWRITEBYTECODE=1",
                     "--env", {json.dumps(f"BUYER_CODE={code_content}")},
+                    *json.loads({json.dumps(json.dumps(label_args))}),
                     {json.dumps(runtime_image)},
                 ]
                 if {json.dumps(source_type)} == "archive":
@@ -299,9 +387,11 @@ def create_shell_runtime_service(
     placement_constraint: str,
     runtime_image: str,
     entry_command: list[str],
+    labels: dict[str, str] | None = None,
 ) -> dict[str, object]:
     client = _ssh_client(settings)
     try:
+        label_args = _label_args(labels)
         script = dedent(
             f"""
             python3 - <<'PY'
@@ -315,6 +405,7 @@ def create_shell_runtime_service(
                     "--name", {json.dumps(service_name)},
                     "--constraint", {json.dumps(placement_constraint)},
                     "--restart-condition", "none",
+                    *json.loads({json.dumps(json.dumps(label_args))}),
                     {json.dumps(runtime_image)},
                     *json.loads({json.dumps(json.dumps(entry_command))}),
                 ]
@@ -551,6 +642,10 @@ def probe_node_capabilities_on_node(
 
 
 def inspect_code_runtime_service(settings: Settings, *, service_name: str) -> dict[str, object]:
+    return inspect_swarm_service(settings, service_name=service_name)
+
+
+def inspect_swarm_service(settings: Settings, *, service_name: str) -> dict[str, object]:
     client = _ssh_client(settings)
     try:
         ps_result = _exec(
@@ -577,17 +672,161 @@ def inspect_code_runtime_service(settings: Settings, *, service_name: str) -> di
 
 
 def remove_code_runtime_service(settings: Settings, *, service_name: str, config_name: str) -> dict[str, object]:
+    return remove_runtime_session_bundle(
+        settings,
+        runtime_service_name=service_name,
+        config_name=config_name,
+        gateway_service_name=None,
+    )
+
+
+def remove_runtime_session_bundle(
+    settings: Settings,
+    *,
+    runtime_service_name: str,
+    config_name: str,
+    gateway_service_name: str | None,
+) -> dict[str, object]:
     client = _ssh_client(settings)
     try:
         archive_config_name = f"{config_name}-archive"
-        service_result = _exec(client, f"docker service rm {service_name}")
+        runtime_service_result = _exec(client, f"docker service rm {runtime_service_name}")
+        gateway_service_result = (
+            _exec(client, f"docker service rm {gateway_service_name}") if gateway_service_name else {"ok": False}
+        )
         config_result = _exec(client, f"docker config rm {config_name}")
         archive_config_result = _exec(client, f"docker config rm {archive_config_name}")
         return {
-            "ok": bool(service_result["ok"] or config_result["ok"] or archive_config_result["ok"]),
-            "service_result": service_result,
+            "ok": bool(
+                runtime_service_result["ok"]
+                or gateway_service_result["ok"]
+                or config_result["ok"]
+                or archive_config_result["ok"]
+            ),
+            "runtime_service_result": runtime_service_result,
+            "gateway_service_result": gateway_service_result,
             "config_result": config_result,
             "archive_config_result": archive_config_result,
         }
     finally:
         client.close()
+
+
+def create_runtime_session_bundle(
+    settings: Settings,
+    *,
+    session_id: int,
+    buyer_user_id: int,
+    seller_node_id: int,
+    runtime_service_name: str,
+    config_name: str,
+    gateway_service_name: str,
+    gateway_port: int,
+    placement_constraint: str,
+    runtime_image: str,
+    session_mode: str,
+    entry_command: list[str],
+    report_url: str,
+    session_token: str,
+    code_filename: str = "main.py",
+    code_content: str = "",
+    source_type: str = "inline_code",
+    archive_filename: str | None = None,
+    archive_content_base64: str = "",
+    working_dir: str | None = None,
+    run_command: list[str] | None = None,
+) -> dict[str, object]:
+    runtime_labels = {
+        "pivot.session_id": str(session_id),
+        "pivot.buyer_user_id": str(buyer_user_id),
+        "pivot.seller_node_id": str(seller_node_id),
+        "pivot.role": "runtime",
+    }
+    gateway_features = [
+        item.strip()
+        for item in settings.SESSION_GATEWAY_SUPPORTED_FEATURES.split(",")
+        if item.strip()
+    ] or ["exec", "logs", "shell"]
+    gateway_labels = {
+        "pivot.session_id": str(session_id),
+        "pivot.buyer_user_id": str(buyer_user_id),
+        "pivot.seller_node_id": str(seller_node_id),
+        "pivot.role": "gateway",
+    }
+    created_runtime = False
+    created_gateway = False
+    try:
+        gateway_result = create_session_gateway_service(
+            settings,
+            service_name=gateway_service_name,
+            placement_constraint=placement_constraint,
+            gateway_port=gateway_port,
+            runtime_service_name=runtime_service_name,
+            session_id=session_id,
+            buyer_user_id=buyer_user_id,
+            seller_node_id=seller_node_id,
+            session_token=session_token,
+            supported_features=gateway_features,
+            labels=gateway_labels,
+        )
+        created_gateway = True
+        if session_mode == "shell":
+            runtime_result = create_shell_runtime_service(
+                settings,
+                service_name=runtime_service_name,
+                placement_constraint=placement_constraint,
+                runtime_image=runtime_image,
+                entry_command=entry_command,
+                labels=runtime_labels,
+            )
+        else:
+            runtime_result = create_code_runtime_service(
+                settings,
+                service_name=runtime_service_name,
+                config_name=config_name,
+                placement_constraint=placement_constraint,
+                runtime_image=runtime_image,
+                code_filename=code_filename,
+                code_content=code_content,
+                entry_command=entry_command,
+                report_url=report_url,
+                session_token=session_token,
+                source_type=source_type,
+                archive_filename=archive_filename,
+                archive_content_base64=archive_content_base64,
+                working_dir=working_dir,
+                run_command=run_command,
+                labels=runtime_labels,
+            )
+        created_runtime = True
+        return {
+            "ok": True,
+            "runtime": runtime_result,
+            "gateway": gateway_result,
+        }
+    except Exception:
+        if created_runtime or created_gateway:
+            try:
+                remove_runtime_session_bundle(
+                    settings,
+                    runtime_service_name=runtime_service_name,
+                    config_name=config_name,
+                    gateway_service_name=gateway_service_name,
+                )
+            except Exception:
+                pass
+        raise
+
+
+def inspect_runtime_session_bundle(
+    settings: Settings,
+    *,
+    runtime_service_name: str,
+    gateway_service_name: str | None,
+) -> dict[str, object]:
+    runtime_result = inspect_swarm_service(settings, service_name=runtime_service_name)
+    gateway_result = inspect_swarm_service(settings, service_name=gateway_service_name) if gateway_service_name else {}
+    return {
+        "runtime": runtime_result,
+        "gateway": gateway_result,
+    }

@@ -1,5 +1,25 @@
-from fastapi.testclient import TestClient
 from types import SimpleNamespace
+
+from fastapi.testclient import TestClient
+
+
+def _fake_bundle_create(_settings, **_kwargs):
+    return {"ok": True, "runtime": {"ok": True}, "gateway": {"ok": True}}
+
+
+def _running_bundle_inspect(logs: str = ""):
+    return {
+        "runtime": {
+            "tasks": [{"CurrentState": "Running 1 second ago", "DesiredState": "Running"}],
+            "current_task": {"CurrentState": "Running 1 second ago", "DesiredState": "Running"},
+            "logs": logs,
+        },
+        "gateway": {
+            "tasks": [{"CurrentState": "Running 1 second ago", "DesiredState": "Running"}],
+            "current_task": {"CurrentState": "Running 1 second ago", "DesiredState": "Running"},
+            "logs": "",
+        },
+    }
 
 
 def test_register_login_and_me_flow(client: TestClient) -> None:
@@ -99,7 +119,7 @@ def test_node_registration_heartbeat_and_image_report_flow(client: TestClient, m
             "repository": "seller/demo",
             "tag": "v1",
             "digest": "sha256:test",
-            "registry": "81.70.52.75:5000",
+            "registry": "pivotcompute.store",
             "source_image": "alpine:3.20",
             "status": "uploaded",
         },
@@ -166,7 +186,7 @@ def test_node_registration_heartbeat_and_image_report_flow(client: TestClient, m
 def test_codex_runtime_and_wireguard_bootstrap_flow(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr("app.api.routes.platform.settings.OPENAI_API_KEY", "test-platform-key")
     monkeypatch.setattr("app.api.routes.platform.settings.WIREGUARD_SERVER_PUBLIC_KEY", "server-public-key")
-    monkeypatch.setattr("app.api.routes.platform.settings.WIREGUARD_ENDPOINT_HOST", "81.70.52.75")
+    monkeypatch.setattr("app.api.routes.platform.settings.WIREGUARD_ENDPOINT_HOST", "pivotcompute.store")
     monkeypatch.setattr("app.api.routes.platform.settings.WIREGUARD_ENDPOINT_PORT", 45182)
     monkeypatch.setattr("app.api.routes.platform.settings.WIREGUARD_NETWORK_CIDR", "10.66.66.0/24")
     monkeypatch.setattr("app.api.routes.platform.settings.WIREGUARD_ALLOWED_IPS", "10.66.66.0/24")
@@ -243,7 +263,7 @@ def test_codex_runtime_and_wireguard_bootstrap_flow(client: TestClient, monkeypa
     assert wireguard_response.status_code == 200
     payload = wireguard_response.json()
     assert payload["interface_name"] == "wg-seller"
-    assert payload["server_endpoint_host"] == "81.70.52.75"
+    assert payload["server_endpoint_host"] == "pivotcompute.store"
     assert payload["client_address"].endswith("/32")
     assert payload["server_peer_apply_required"] is False
     assert payload["server_peer_apply_status"] == "applied"
@@ -277,19 +297,19 @@ def test_remote_swarm_overview_and_worker_join_token_endpoints(client: TestClien
         "app.api.routes.platform.get_worker_join_token",
         lambda settings: {
             "join_token": "SWMTKN-test",
-            "manager_host": "81.70.52.75",
+            "manager_host": "pivotcompute.store",
             "manager_port": 2377,
         },
     )
     monkeypatch.setattr(
         "app.api.routes.platform.get_manager_overview",
         lambda settings: {
-            "manager_host": "81.70.52.75",
+            "manager_host": "pivotcompute.store",
             "manager_port": 2377,
             "swarm": {
                 "state": "active",
                 "node_id": "manager-node",
-                "node_addr": "81.70.52.75",
+                "node_addr": "pivotcompute.store",
                 "control_available": True,
                 "nodes": 2,
                 "managers": 1,
@@ -353,7 +373,14 @@ def test_buyer_runtime_session_flow(client: TestClient, monkeypatch) -> None:
             "system": "Windows",
             "machine": "AMD64",
             "shared_percent_preference": 10,
-            "capabilities": {"cpu_count_logical": 24},
+            "capabilities": {
+                "cpu_count_logical": 24,
+                "interfaces": {
+                    "wg-seller": [
+                        {"family": 2, "address": "10.66.66.10"},
+                    ]
+                },
+            },
             "seller_intent": "seller runtime test",
             "docker_status": "ready",
             "swarm_state": "active",
@@ -376,19 +403,12 @@ def test_buyer_runtime_session_flow(client: TestClient, monkeypatch) -> None:
     )
     buyer_token = buyer_login.json()["access_token"]
 
-    monkeypatch.setattr("app.api.routes.buyer.create_code_runtime_service", lambda settings, **kwargs: {"ok": True})
+    monkeypatch.setattr("app.api.routes.buyer.create_runtime_session_bundle", _fake_bundle_create)
     monkeypatch.setattr(
-        "app.api.routes.buyer.inspect_code_runtime_service",
-        lambda settings, service_name: {
-            "tasks": [{"CurrentState": "Running 3 seconds ago", "DesiredState": "Running"}],
-            "current_task": {"CurrentState": "Running 3 seconds ago", "DesiredState": "Running"},
-            "logs": "hello from buyer runtime",
-        },
+        "app.api.routes.buyer.inspect_runtime_session_bundle",
+        lambda settings, **kwargs: _running_bundle_inspect(logs="hello from buyer runtime"),
     )
-    monkeypatch.setattr(
-        "app.api.routes.buyer.remove_code_runtime_service",
-        lambda settings, service_name, config_name: {"ok": True},
-    )
+    monkeypatch.setattr("app.api.routes.buyer.remove_runtime_session_bundle", lambda settings, **kwargs: {"ok": True})
 
     create_response = client.post(
         "/api/v1/buyer/runtime-sessions",
@@ -410,6 +430,8 @@ def test_buyer_runtime_session_flow(client: TestClient, monkeypatch) -> None:
     )
     assert redeem_response.status_code == 200
     assert redeem_response.json()["access_mode"] == "relay"
+    assert redeem_response.json()["gateway_required"] is True
+    assert redeem_response.json()["gateway_port"] is not None
 
     session_id = create_payload["session_id"]
     status_response = client.get(
@@ -418,6 +440,7 @@ def test_buyer_runtime_session_flow(client: TestClient, monkeypatch) -> None:
     )
     assert status_response.status_code == 200
     assert status_response.json()["status"] == "running"
+    assert status_response.json()["gateway_status"] == "online"
     assert "hello from buyer runtime" in status_response.json()["logs"]
 
     stop_response = client.post(
@@ -426,6 +449,72 @@ def test_buyer_runtime_session_flow(client: TestClient, monkeypatch) -> None:
     )
     assert stop_response.status_code == 200
     assert stop_response.json()["status"] == "stopped"
+
+
+def test_buyer_runtime_session_create_requires_seller_wireguard_ready(client: TestClient) -> None:
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "seller-runtime-missing-wg@example.com",
+            "password": "super-secret-password",
+            "display_name": "Runtime Seller Missing WG",
+        },
+    )
+    seller_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "seller-runtime-missing-wg@example.com", "password": "super-secret-password"},
+    )
+    seller_token = seller_login.json()["access_token"]
+    node_token_response = client.post(
+        "/api/v1/platform/node-registration-token",
+        json={"label": "buyer-runtime-node-missing-wg", "expires_hours": 48},
+        headers={"Authorization": f"Bearer {seller_token}"},
+    )
+    node_token = node_token_response.json()["node_registration_token"]
+    client.post(
+        "/api/v1/platform/nodes/register",
+        json={
+            "node_id": "buyer-runtime-node-missing-wg-001",
+            "device_fingerprint": "device-rt-missing-wg-001",
+            "hostname": "docker-desktop",
+            "system": "Windows",
+            "machine": "AMD64",
+            "shared_percent_preference": 10,
+            "capabilities": {"cpu_count_logical": 24},
+            "seller_intent": "seller runtime test missing wireguard",
+            "docker_status": "ready",
+            "swarm_state": "active",
+            "node_class": "cpu-basic",
+        },
+        headers={"Authorization": f"Bearer {node_token}"},
+    )
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "buyer-runtime-missing-wg@example.com",
+            "password": "super-secret-password",
+            "display_name": "Runtime Buyer Missing WG",
+        },
+    )
+    buyer_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "buyer-runtime-missing-wg@example.com", "password": "super-secret-password"},
+    )
+    buyer_token = buyer_login.json()["access_token"]
+
+    create_response = client.post(
+        "/api/v1/buyer/runtime-sessions",
+        json={
+            "seller_node_key": "buyer-runtime-node-missing-wg-001",
+            "runtime_image": "python:3.12-alpine",
+            "code_filename": "main.py",
+            "code_content": "print('hello from buyer runtime')",
+        },
+        headers={"Authorization": f"Bearer {buyer_token}"},
+    )
+    assert create_response.status_code == 409
+    assert create_response.json()["detail"] == "seller_node_wireguard_not_ready"
 
 
 def test_buyer_runtime_session_archive_source_flow(client: TestClient, monkeypatch) -> None:
@@ -457,7 +546,14 @@ def test_buyer_runtime_session_archive_source_flow(client: TestClient, monkeypat
             "system": "Windows",
             "machine": "AMD64",
             "shared_percent_preference": 10,
-            "capabilities": {"cpu_count_logical": 24},
+            "capabilities": {
+                "cpu_count_logical": 24,
+                "interfaces": {
+                    "wg-seller": [
+                        {"family": 2, "address": "10.66.66.10"},
+                    ]
+                },
+            },
             "seller_intent": "archive seller test",
             "docker_status": "ready",
             "swarm_state": "state=active node_id=ql6wifxs5vfs2d8ezr884pihx",
@@ -480,14 +576,10 @@ def test_buyer_runtime_session_archive_source_flow(client: TestClient, monkeypat
     )
     buyer_token = buyer_login.json()["access_token"]
 
-    monkeypatch.setattr("app.api.routes.buyer.create_code_runtime_service", lambda settings, **kwargs: {"ok": True})
+    monkeypatch.setattr("app.api.routes.buyer.create_runtime_session_bundle", _fake_bundle_create)
     monkeypatch.setattr(
-        "app.api.routes.buyer.inspect_code_runtime_service",
-        lambda settings, service_name: {
-            "tasks": [{"CurrentState": "Running 1 second ago", "DesiredState": "Running"}],
-            "current_task": {"CurrentState": "Running 1 second ago", "DesiredState": "Running"},
-            "logs": "",
-        },
+        "app.api.routes.buyer.inspect_runtime_session_bundle",
+        lambda settings, **kwargs: _running_bundle_inspect(),
     )
 
     create_response = client.post(
@@ -537,7 +629,14 @@ def test_buyer_runtime_session_renew_flow(client: TestClient, monkeypatch) -> No
             "system": "Windows",
             "machine": "AMD64",
             "shared_percent_preference": 10,
-            "capabilities": {"cpu_count_logical": 24},
+            "capabilities": {
+                "cpu_count_logical": 24,
+                "interfaces": {
+                    "wg-seller": [
+                        {"family": 2, "address": "10.66.66.10"},
+                    ]
+                },
+            },
             "seller_intent": "renew seller test",
             "docker_status": "ready",
             "swarm_state": "state=active node_id=ql6wifxs5vfs2d8ezr884pihx",
@@ -560,14 +659,10 @@ def test_buyer_runtime_session_renew_flow(client: TestClient, monkeypatch) -> No
     )
     buyer_token = buyer_login.json()["access_token"]
 
-    monkeypatch.setattr("app.api.routes.buyer.create_shell_runtime_service", lambda settings, **kwargs: {"ok": True})
+    monkeypatch.setattr("app.api.routes.buyer.create_runtime_session_bundle", _fake_bundle_create)
     monkeypatch.setattr(
-        "app.api.routes.buyer.inspect_code_runtime_service",
-        lambda settings, service_name: {
-            "tasks": [{"CurrentState": "Running 1 second ago", "DesiredState": "Running"}],
-            "current_task": {"CurrentState": "Running 1 second ago", "DesiredState": "Running"},
-            "logs": "",
-        },
+        "app.api.routes.buyer.inspect_runtime_session_bundle",
+        lambda settings, **kwargs: _running_bundle_inspect(),
     )
 
     create_response = client.post(
@@ -652,17 +747,13 @@ def test_buyer_runtime_session_wireguard_bootstrap_flow(client: TestClient, monk
     )
     buyer_token = buyer_login.json()["access_token"]
 
-    monkeypatch.setattr("app.api.routes.buyer.create_shell_runtime_service", lambda settings, **kwargs: {"ok": True})
+    monkeypatch.setattr("app.api.routes.buyer.create_runtime_session_bundle", _fake_bundle_create)
     monkeypatch.setattr(
-        "app.api.routes.buyer.inspect_code_runtime_service",
-        lambda settings, service_name: {
-            "tasks": [{"CurrentState": "Running 1 second ago", "DesiredState": "Running"}],
-            "current_task": {"CurrentState": "Running 1 second ago", "DesiredState": "Running"},
-            "logs": "",
-        },
+        "app.api.routes.buyer.inspect_runtime_session_bundle",
+        lambda settings, **kwargs: _running_bundle_inspect(),
     )
     monkeypatch.setattr("app.api.routes.buyer.settings.WIREGUARD_SERVER_PUBLIC_KEY", "server-public-key")
-    monkeypatch.setattr("app.api.routes.buyer.settings.WIREGUARD_ENDPOINT_HOST", "81.70.52.75")
+    monkeypatch.setattr("app.api.routes.buyer.settings.WIREGUARD_ENDPOINT_HOST", "pivotcompute.store")
     monkeypatch.setattr("app.api.routes.buyer.settings.WIREGUARD_ENDPOINT_PORT", 45182)
     monkeypatch.setattr("app.api.routes.buyer.settings.WIREGUARD_BUYER_INTERFACE", "wg-buyer")
     monkeypatch.setattr("app.api.routes.buyer.settings.WIREGUARD_NETWORK_CIDR", "10.66.66.0/24")
@@ -682,7 +773,23 @@ def test_buyer_runtime_session_wireguard_bootstrap_flow(client: TestClient, monk
         headers={"Authorization": f"Bearer {buyer_token}"},
     )
     assert create_response.status_code == 200
-    session_id = create_response.json()["session_id"]
+    create_payload = create_response.json()
+    session_id = create_payload["session_id"]
+
+    redeem_response = client.post(
+        "/api/v1/buyer/runtime-sessions/redeem",
+        json={"connect_code": create_payload["connect_code"]},
+    )
+    assert redeem_response.status_code == 200
+    assert redeem_response.json()["gateway_required"] is True
+
+    handshake_response = client.post(
+        f"/api/v1/buyer/runtime-sessions/{session_id}/gateway/handshake",
+        json={"session_token": redeem_response.json()["session_token"]},
+    )
+    assert handshake_response.status_code == 200
+    assert handshake_response.json()["gateway_host"] == "10.66.66.10"
+    assert handshake_response.json()["gateway_port"] == create_payload["gateway_port"]
 
     bootstrap_response = client.post(
         f"/api/v1/buyer/runtime-sessions/{session_id}/wireguard/bootstrap",
@@ -740,7 +847,14 @@ def test_cleanup_expired_runtime_sessions_revokes_wireguard_peer(client: TestCli
             "system": "Windows",
             "machine": "AMD64",
             "shared_percent_preference": 10,
-            "capabilities": {"cpu_count_logical": 24},
+            "capabilities": {
+                "cpu_count_logical": 24,
+                "interfaces": {
+                    "wg-seller": [
+                        {"family": 2, "address": "10.66.66.10"},
+                    ]
+                },
+            },
             "seller_intent": "expire seller test",
             "docker_status": "ready",
             "swarm_state": "state=active node_id=ql6wifxs5vfs2d8ezr884pihx",
@@ -763,17 +877,13 @@ def test_cleanup_expired_runtime_sessions_revokes_wireguard_peer(client: TestCli
     )
     buyer_token = buyer_login.json()["access_token"]
 
-    monkeypatch.setattr("app.api.routes.buyer.create_shell_runtime_service", lambda settings, **kwargs: {"ok": True})
+    monkeypatch.setattr("app.api.routes.buyer.create_runtime_session_bundle", _fake_bundle_create)
     monkeypatch.setattr(
-        "app.api.routes.buyer.inspect_code_runtime_service",
-        lambda settings, service_name: {
-            "tasks": [{"CurrentState": "Running 1 second ago", "DesiredState": "Running"}],
-            "current_task": {"CurrentState": "Running 1 second ago", "DesiredState": "Running"},
-            "logs": "",
-        },
+        "app.api.routes.buyer.inspect_runtime_session_bundle",
+        lambda settings, **kwargs: _running_bundle_inspect(),
     )
     removed_peers: list[str] = []
-    monkeypatch.setattr("app.services.runtime_sessions.remove_code_runtime_service", lambda settings, **kwargs: {"ok": True})
+    monkeypatch.setattr("app.services.runtime_sessions.remove_runtime_session_bundle", lambda settings, **kwargs: {"ok": True})
     monkeypatch.setattr(
         "app.services.runtime_sessions.remove_server_peer",
         lambda settings, public_key: removed_peers.append(public_key) or {"ok": True},

@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import psutil
 from mcp.server import FastMCP
@@ -29,12 +30,13 @@ from seller_client.windows_elevation import (
     windows_is_elevated,
 )
 
-DEFAULT_MANAGER_HOST = "81.70.52.75"
+DEFAULT_MANAGER_HOST = "pivotcompute.store"
 DEFAULT_MANAGER_PORT = 2377
-DEFAULT_REGISTRY = "81.70.52.75:5000"
-DEFAULT_PORTAINER_URL = "https://81.70.52.75:9443"
+DEFAULT_REGISTRY = "pivotcompute.store"
+DEFAULT_PORTAINER_URL = "https://pivotcompute.store:9443"
 DEFAULT_WG_INTERFACE = "wg-seller"
 DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
+LEGACY_REGISTRY_HOSTS = {"81.70.52.75"}
 
 
 def _default_state_dir() -> Path:
@@ -94,7 +96,6 @@ def _default_config() -> dict[str, Any]:
             "dns": "",
         },
         "docker": {
-            "registry_insecure": True,
             "last_pushed_image": "",
         },
         "runtime": {
@@ -274,16 +275,36 @@ def _run_backend_request(
     )
 
 
+def _normalize_registry_reference(registry: str) -> str:
+    normalized = registry.strip().rstrip("/")
+    if not normalized:
+        return DEFAULT_REGISTRY
+
+    parsed = urlsplit(normalized if "://" in normalized else f"https://{normalized}")
+    host = (parsed.hostname or "").lower()
+    port = parsed.port
+    path = (parsed.path or "").strip("/")
+
+    if not path and host in {DEFAULT_REGISTRY, *LEGACY_REGISTRY_HOSTS} and port in {None, 443, 5000}:
+        return DEFAULT_REGISTRY
+
+    if parsed.hostname:
+        if parsed.port is not None:
+            return f"{host}:{parsed.port}"
+        return host
+    return normalized
+
+
 def _registry_base_url(registry: str) -> str:
-    registry = registry.strip().rstrip("/")
-    if registry.startswith("http://") or registry.startswith("https://"):
-        return registry
-    return f"http://{registry}"
+    normalized = _normalize_registry_reference(registry)
+    _, port = _registry_host_port(normalized)
+    scheme = "http" if port == 80 else "https"
+    return f"{scheme}://{normalized}"
 
 
 def _server_registry(registry: str | None = None, base_dir: Path | None = None) -> str:
     config = _load_client_config(base_dir)
-    return registry or config["server"]["registry"]
+    return _normalize_registry_reference(registry or config["server"]["registry"])
 
 
 def _backend_url(backend_url: str | None = None, base_dir: Path | None = None) -> str:
@@ -298,23 +319,15 @@ def _build_remote_image_ref(
     base_dir: Path | None = None,
 ) -> str:
     registry_host = _server_registry(registry, base_dir)
-    normalized_registry = registry_host.replace("http://", "").replace("https://", "")
-    return f"{normalized_registry.rstrip('/')}/{repository}:{remote_tag}"
+    return f"{registry_host.rstrip('/')}/{repository}:{remote_tag}"
 
 
 def _registry_host_port(registry: str) -> tuple[str, int]:
-    normalized = registry.replace("http://", "").replace("https://", "").rstrip("/")
+    normalized = _normalize_registry_reference(registry)
     if ":" in normalized:
         host, port = normalized.rsplit(":", maxsplit=1)
         return host, int(port)
     return normalized, 443
-
-
-def _docker_certs_dir(registry_host: str, registry_port: int) -> Path:
-    base = Path.home() / ".docker" / "certs.d"
-    if platform.system() == "Windows":
-        return base / f"{registry_host}{registry_port}"
-    return base / f"{registry_host}:{registry_port}"
 
 
 def _wireguard_windows_exe() -> str | None:
@@ -454,34 +467,32 @@ def _extract_share_percent(intent: str) -> int:
     return max(1, min(int(match.group(1)), 100))
 
 
-def _fetch_server_certificate(registry_host: str, registry_port: int) -> str:
-    return ssl.get_server_certificate((registry_host, registry_port))
-
-
-def _install_registry_certificate(
-    registry_host: str,
-    registry_port: int,
-    certificate_pem: str,
-) -> dict[str, Any]:
-    cert_dir = _docker_certs_dir(registry_host, registry_port)
-    cert_dir.mkdir(parents=True, exist_ok=True)
-    cert_path = cert_dir / "ca.crt"
-    cert_path.write_text(certificate_pem, encoding="utf-8")
-
-    result: dict[str, Any] = {"ok": True, "cert_path": str(cert_path)}
-    if platform.system() == "Windows":
-        import_result = _run_command(
-            [
-                "certutil",
-                "-user",
-                "-addstore",
-                "Root",
-                str(cert_path),
-            ]
-        )
-        result["trust_store"] = import_result
-        result["ok"] = import_result["ok"]
-    return result
+def _verify_server_certificate(registry_host: str, registry_port: int) -> dict[str, Any]:
+    context = ssl.create_default_context()
+    try:
+        with socket.create_connection((registry_host, registry_port), timeout=10) as raw_socket:
+            with context.wrap_socket(raw_socket, server_hostname=registry_host) as tls_socket:
+                certificate = tls_socket.getpeercert()
+        return {
+            "ok": True,
+            "trusted": True,
+            "subject": certificate.get("subject", ()),
+            "issuer": certificate.get("issuer", ()),
+        }
+    except ssl.SSLCertVerificationError as exc:
+        return {
+            "ok": False,
+            "trusted": False,
+            "error_type": "certificate_verification_failed",
+            "error": str(exc),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "trusted": False,
+            "error_type": "tls_connection_failed",
+            "error": str(exc),
+        }
 
 
 mcp = FastMCP(
@@ -571,11 +582,12 @@ def configure_environment(
     base_dir = Path(state_dir).expanduser().resolve() if state_dir else None
     _ensure_client_dirs(base_dir)
     config = _load_client_config(base_dir)
+    normalized_registry = _normalize_registry_reference(registry)
     config["server"].update(
         {
             "manager_host": manager_host,
             "manager_port": manager_port,
-            "registry": registry,
+            "registry": normalized_registry,
             "portainer_url": portainer_url,
             "backend_url": backend_url,
         }
@@ -1032,7 +1044,7 @@ def report_image_to_platform(
             "repository": repository,
             "tag": tag,
             "digest": digest,
-            "registry": registry,
+            "registry": _normalize_registry_reference(registry),
             "source_image": source_image,
             "status": status,
         },
@@ -1306,7 +1318,7 @@ def connect_server_vpn(interface_name: str = DEFAULT_WG_INTERFACE, state_dir: st
                 "ok": False,
                 "error": "wireguard_elevated_helper_not_installed",
                 "task_name": wireguard_helper_task_name(),
-                "install_hint": "Run seller_client/install_windows.ps1 -Apply once as administrator.",
+                "install_hint": "Run environment_check/install_windows.ps1 -Apply once as administrator.",
             }
         if shutil.which("wg-quick"):
             return _run_command(["wg-quick", "up", str(config_path)])
@@ -1344,7 +1356,7 @@ def disconnect_server_vpn(interface_name: str = DEFAULT_WG_INTERFACE, state_dir:
                 "ok": False,
                 "error": "wireguard_elevated_helper_not_installed",
                 "task_name": wireguard_helper_task_name(),
-                "install_hint": "Run seller_client/install_windows.ps1 -Apply once as administrator.",
+                "install_hint": "Run environment_check/install_windows.ps1 -Apply once as administrator.",
             }
         if shutil.which("wg-quick"):
             return _run_command(["wg-quick", "down", str(config_path)])
@@ -1678,79 +1690,71 @@ def push_and_report_image(
     }
 
 
-@mcp.tool(description="Probe a registry v2 catalog endpoint over HTTP or HTTPS.")
+@mcp.tool(description="Probe a registry v2 HTTPS endpoint.")
 def probe_registry(registry_url: str) -> dict[str, Any]:
     base_url = _registry_base_url(registry_url)
-    return _run_registry_request("GET", f"{base_url}/v2/_catalog")
+    return _run_registry_request("GET", f"{base_url}/v2/")
 
 
-@mcp.tool(description="Fetch the TLS certificate currently served by the remote registry.")
+@mcp.tool(description="Check whether the remote registry is serving a publicly trusted HTTPS certificate.")
 def fetch_registry_certificate(registry: str = DEFAULT_REGISTRY) -> dict[str, Any]:
-    host, port = _registry_host_port(registry)
-    try:
-        pem = _fetch_server_certificate(host, port)
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": str(exc), "registry": registry}
-    return {"ok": True, "registry": registry, "certificate_pem": pem}
+    normalized_registry = _normalize_registry_reference(registry)
+    host, port = _registry_host_port(normalized_registry)
+    trust_probe = _verify_server_certificate(host, port)
+    if not trust_probe.get("ok"):
+        return {
+            "ok": False,
+            "registry": normalized_registry,
+            "trust_probe": trust_probe,
+            "error": trust_probe.get("error") or "registry_tls_check_failed",
+        }
+    return {
+        "ok": True,
+        "registry": normalized_registry,
+        "trust_probe": trust_probe,
+        "publicly_trusted": True,
+    }
 
 
-@mcp.tool(description="Install a registry CA certificate locally so Docker can trust the registry.")
-def install_registry_certificate(
-    registry: str = DEFAULT_REGISTRY,
-    certificate_pem: str | None = None,
-) -> dict[str, Any]:
-    host, port = _registry_host_port(registry)
-    pem = certificate_pem or _fetch_server_certificate(host, port)
-    result = _install_registry_certificate(host, port, pem)
-    result["registry"] = registry
-    return result
-
-
-@mcp.tool(description="Restart the local Docker runtime and wait until docker info succeeds again.")
-def restart_local_docker(timeout_seconds: int = 240) -> dict[str, Any]:
-    if platform.system() == "Windows":
-        restart_result = _run_command(["docker", "desktop", "restart", "-d"])
-    else:
-        if shutil.which("systemctl"):
-            restart_result = _run_command(["systemctl", "restart", "docker"])
-        elif shutil.which("service"):
-            restart_result = _run_command(["service", "docker", "restart"])
-        else:
-            return {"ok": False, "error": "docker_restart_command_not_found"}
-
-    waited = _wait_for_docker(timeout_seconds)
-    return {"ok": waited["ok"], "restart_result": restart_result, "docker_info": waited}
-
-
-@mcp.tool(description="Configure Docker registry trust using the registry TLS certificate and restart Docker.")
+@mcp.tool(description="Check registry HTTPS access on the public pivotcompute.store endpoint.")
 def configure_registry_trust(
     registry: str = DEFAULT_REGISTRY,
     restart_docker: bool = True,
 ) -> dict[str, Any]:
-    fetch_result = fetch_registry_certificate(registry)
+    normalized_registry = _normalize_registry_reference(registry)
+    fetch_result = fetch_registry_certificate(normalized_registry)
     if not fetch_result["ok"]:
         return {"ok": False, "stage": "fetch_certificate", "fetch_result": fetch_result}
 
-    install_result = install_registry_certificate(
-        registry=registry,
-        certificate_pem=fetch_result["certificate_pem"],
-    )
-    if not install_result["ok"]:
-        return {"ok": False, "stage": "install_certificate", "install_result": install_result}
-
-    restart_result: dict[str, Any] | None = None
-    if restart_docker:
-        restart_result = restart_local_docker()
-        if not restart_result["ok"]:
-            return {"ok": False, "stage": "restart_docker", "restart_result": restart_result}
+    probe_result = probe_registry(normalized_registry)
+    if not probe_result["ok"]:
+        return {"ok": False, "stage": "probe_registry", "fetch_result": fetch_result, "probe_result": probe_result}
 
     return {
         "ok": True,
-        "registry": registry,
-        "fetch_result": {"ok": True},
-        "install_result": install_result,
-        "restart_result": restart_result,
+        "registry": normalized_registry,
+        "trust_mode": "public_https",
+        "input_registry": registry,
+        "legacy_input_upgraded": normalized_registry != registry.strip().rstrip("/"),
+        "fetch_result": fetch_result,
+        "probe_result": probe_result,
+        "restart_docker_requested": restart_docker,
     }
+
+    if fetch_result.get("publicly_trusted"):
+        return {
+            "ok": True,
+            "registry": registry,
+            "trust_mode": "public_https",
+            "fetch_result": fetch_result,
+            "install_result": {
+                "ok": True,
+                "action": "https_only",
+                "detail": "Registry 证书已经由系统 CA 信任，无需额外安装本地 CA 或重启 Docker。",
+            },
+            "restart_result": None,
+        }
+
 
 
 @mcp.tool(description="List repositories currently uploaded to the server registry.")

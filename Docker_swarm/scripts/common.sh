@@ -13,15 +13,20 @@ LOCAL_REGISTRY_NAME="${LOCAL_REGISTRY_NAME:-pivot-swarm-registry}"
 LOCAL_REGISTRY_PORT="${LOCAL_REGISTRY_PORT:-5000}"
 
 default_registry_host() {
-  local state
-  state="$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || true)"
+  echo "pivotcompute.store"
+}
 
-  if [[ "$state" == "active" ]]; then
-    echo "$(manager_addr):${LOCAL_REGISTRY_PORT}"
-    return 0
-  fi
+normalize_registry_host() {
+  local registry_host="$1"
 
-  echo "127.0.0.1:${LOCAL_REGISTRY_PORT}"
+  case "${registry_host,,}" in
+    ""|"pivotcompute.store"|"https://pivotcompute.store"|"pivotcompute.store:443"|"https://pivotcompute.store:443"|"81.70.52.75"|"81.70.52.75:5000"|"https://81.70.52.75:5000"|"http://81.70.52.75:5000")
+      echo "pivotcompute.store"
+      ;;
+    *)
+      echo "$registry_host"
+      ;;
+  esac
 }
 
 load_env() {
@@ -32,7 +37,7 @@ load_env() {
     set +a
   fi
 
-  export REGISTRY_HOST="${REGISTRY_HOST:-$(default_registry_host)}"
+  export REGISTRY_HOST="$(normalize_registry_host "${REGISTRY_HOST:-$(default_registry_host)}")"
   export REGISTRY_BIND_IP="${REGISTRY_BIND_IP:-0.0.0.0}"
   export BACKEND_SWARM_IMAGE="${BACKEND_SWARM_IMAGE:-$REGISTRY_HOST/pivot-backend-build-team/backend:swarm-local}"
   export BENCHMARK_SWARM_IMAGE="${BENCHMARK_SWARM_IMAGE:-$REGISTRY_HOST/pivot-backend-build-team/benchmark-worker:swarm-local}"

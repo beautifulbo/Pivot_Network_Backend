@@ -1,5 +1,6 @@
 .env
 .cache/
+.codex_tmp/
 .pytest_cache/
 .venv/
 backend/.venv/
@@ -13,5 +14,11 @@ __pycache__/
 CCCC/runtime/
 .codex/
 backend/.codex/
+*.sqlite
 *.sqlite3
 *.sqlite3-*
+remote_server/
+pivotcompute.store_nginx.zip
+docs/assets/**/environment-check.html
+docs/assets/**/environment-check.json
+docs/assets/**/summary.json

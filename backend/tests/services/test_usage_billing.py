@@ -2,12 +2,18 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.db import SessionLocal
 from app.models.identity import User
-from app.models.platform import BuyerWallet, ImageArtifact, ImageOffer, Node, RuntimeAccessSession
+from app.models.platform import (
+    BuyerWallet,
+    ImageArtifact,
+    ImageOffer,
+    Node,
+    RuntimeAccessSession,
+)
 from app.services.usage_billing import charge_due_session_hour
 
 
 def test_charge_due_session_hour_debits_wallet(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.usage_billing.remove_code_runtime_service", lambda settings, **kwargs: {"ok": True})
+    monkeypatch.setattr("app.services.usage_billing.remove_runtime_session_bundle", lambda settings, **kwargs: {"ok": True})
     monkeypatch.setattr("app.services.usage_billing.remove_server_peer", lambda settings, public_key: {"ok": True})
     db = SessionLocal()
     try:
@@ -85,7 +91,7 @@ def test_charge_due_session_hour_debits_wallet(monkeypatch) -> None:
 
 
 def test_charge_due_session_hour_stops_when_debt_limit_exceeded(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.usage_billing.remove_code_runtime_service", lambda settings, **kwargs: {"ok": True})
+    monkeypatch.setattr("app.services.usage_billing.remove_runtime_session_bundle", lambda settings, **kwargs: {"ok": True})
     monkeypatch.setattr("app.services.usage_billing.remove_server_peer", lambda settings, public_key: {"ok": True})
     db = SessionLocal()
     try:

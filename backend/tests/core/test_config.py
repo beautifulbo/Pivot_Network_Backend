@@ -82,3 +82,4 @@ def test_codex_and_wireguard_defaults_are_present(monkeypatch) -> None:
     assert settings.CODEX_PROVIDER_WIRE_API == "responses"
     assert settings.WIREGUARD_INTERFACE == "wg-seller"
     assert settings.WIREGUARD_NETWORK_CIDR == "10.66.66.0/24"
+    assert settings.SESSION_GATEWAY_SUPPORTED_FEATURES == "exec,logs,shell,files"

@@ -104,7 +104,7 @@ def test_publish_image_offer_and_create_billed_session(client, monkeypatch) -> N
             "repository": "seller/offer-demo",
             "tag": "v1",
             "digest": "sha256:offer",
-            "registry": "81.70.52.75:5000",
+            "registry": "pivotcompute.store",
             "source_image": "python:3.12-alpine",
             "status": "uploaded",
         },
@@ -142,13 +142,23 @@ def test_publish_image_offer_and_create_billed_session(client, monkeypatch) -> N
     assert catalog_response.status_code == 200
     assert offer_payload["id"] in [item["offer_id"] for item in catalog_response.json()]
 
-    monkeypatch.setattr("app.api.routes.buyer.create_code_runtime_service", lambda settings, **kwargs: {"ok": True})
     monkeypatch.setattr(
-        "app.api.routes.buyer.inspect_code_runtime_service",
-        lambda settings, service_name: {
-            "tasks": [{"CurrentState": "Running 1 second ago", "DesiredState": "Running"}],
-            "current_task": {"CurrentState": "Running 1 second ago", "DesiredState": "Running"},
-            "logs": "offer runtime started",
+        "app.api.routes.buyer.create_runtime_session_bundle",
+        lambda settings, **kwargs: {"ok": True, "runtime": {"ok": True}, "gateway": {"ok": True}},
+    )
+    monkeypatch.setattr(
+        "app.api.routes.buyer.inspect_runtime_session_bundle",
+        lambda settings, **kwargs: {
+            "runtime": {
+                "tasks": [{"CurrentState": "Running 1 second ago", "DesiredState": "Running"}],
+                "current_task": {"CurrentState": "Running 1 second ago", "DesiredState": "Running"},
+                "logs": "offer runtime started",
+            },
+            "gateway": {
+                "tasks": [{"CurrentState": "Running 1 second ago", "DesiredState": "Running"}],
+                "current_task": {"CurrentState": "Running 1 second ago", "DesiredState": "Running"},
+                "logs": "",
+            },
         },
     )
 
@@ -202,3 +212,12 @@ def test_publish_image_offer_and_create_billed_session(client, monkeypatch) -> N
     assert redeem_response.status_code == 200
     assert redeem_response.json()["order_id"] == order_payload["id"]
     assert redeem_response.json()["order_status"] == "redeemed"
+
+    start_session_response = client.post(
+        f"/api/v1/buyer/orders/{order_payload['id']}/start-session",
+        headers={"Authorization": f"Bearer {buyer_token}"},
+    )
+    assert start_session_response.status_code == 200
+    assert start_session_response.json()["order_id"] == order_payload["id"]
+    assert start_session_response.json()["offer_id"] == offer_payload["id"]
+    assert start_session_response.json()["gateway_port"] is not None

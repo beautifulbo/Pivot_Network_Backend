@@ -2,9 +2,11 @@ from pathlib import Path
 
 from seller_client.installer import (
     attach_mcp_to_codex,
+    buyer_codex_server_name,
     bootstrap_client,
     codex_server_name,
     desired_mcp_block,
+    environment_check_windows_apply_command,
     ensure_windows_wireguard_helper_task,
     mcp_attached_to_codex,
     upsert_mcp_block,
@@ -21,6 +23,7 @@ def test_attach_mcp_to_codex_writes_block(tmp_path: Path, monkeypatch) -> None:
     assert config_path.exists()
     assert mcp_attached_to_codex(config_path.read_text(encoding="utf-8")) is True
     assert f"[mcp_servers.{codex_server_name()}]" in config_path.read_text(encoding="utf-8")
+    assert f"[mcp_servers.{buyer_codex_server_name()}]" in config_path.read_text(encoding="utf-8")
 
 
 def test_bootstrap_client_returns_expected_status_fields(tmp_path: Path, monkeypatch) -> None:
@@ -31,9 +34,12 @@ def test_bootstrap_client_returns_expected_status_fields(tmp_path: Path, monkeyp
 
     assert result["ok"] is True
     assert "needs_codex_install" in result
+    assert "needs_codex_mcp_attach" in result
+    assert "codex_mcp_servers" in result
     assert "needs_docker_setup" in result
     assert "needs_wireguard_setup" in result
     assert "dirs" in result
+    assert result["windows_apply_command"] == environment_check_windows_apply_command()
 
 
 def test_ensure_windows_wireguard_helper_task_dry_run(monkeypatch) -> None:
@@ -74,7 +80,7 @@ def test_upsert_mcp_block_replaces_existing_invalid_block() -> None:
         'cwd = "D:/AI/Pivot_backend_build_team"\n'
     )
 
-    updated = upsert_mcp_block(original, replacement)
+    updated = upsert_mcp_block(original, codex_server_name(), replacement)
 
     assert 'command = "C:/Users/Administrator/AppData/Local/Programs/Python/Python312/python.EXE"' in updated
     assert 'args = ["D:/old.py"]' not in updated

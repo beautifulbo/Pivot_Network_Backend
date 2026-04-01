@@ -10,6 +10,8 @@ Current local capabilities:
 - download and run a public GitHub repository archive
 - create a shell-style runtime session
 - run one-off `exec` commands inside the runtime container
+- upload local files to the runtime gateway and download generated results back
+- run local CodeX orchestration against the active buyer session through buyer MCP tools
 - renew a lease
 - bootstrap and disconnect local `wg-buyer`
 
@@ -138,9 +140,31 @@ Current page actions:
 - GitHub repository execution
 - shell session creation
 - container `exec`
+- session gateway upload / download
+- interactive terminal bridge
+- local CodeX orchestration panel for workspace + runtime tasks
 - lease renew
 - local `wg-buyer` bootstrap
 - local `wg-buyer` disconnect
+
+## CodeX Panel
+
+The buyer web now includes a `CodeX Orchestration` panel.
+
+Recommended flow:
+
+1. Start or redeem a shell session.
+2. Connect Gateway so the buyer session reaches `connected`.
+3. Select a local workspace path for the task.
+4. Enter a natural-language task for CodeX.
+5. Let local CodeX edit workspace files, call buyer MCP tools for runtime exec/upload/download, and write a final summary back to the page.
+
+The installer path in `environment_check/install_windows.ps1 -Apply` now attaches both MCP servers to local CodeX:
+
+- `sellerNodeAgent`
+- `buyerRuntimeAgent`
+
+That means the same machine setup can reproduce seller onboarding, buyer runtime control, and buyer-side CodeX orchestration without hand-editing `~/.codex/config.toml`.
 
 ## Current Boundary
 

@@ -31,6 +31,10 @@ def wireguard_helper_root() -> Path:
     return program_data_dir() / "PivotSeller" / "wireguard-elevated"
 
 
+def session_gateway_bridge_root() -> Path:
+    return program_data_dir() / "PivotSeller" / "gateway-bridge"
+
+
 def wireguard_helper_request_path() -> Path:
     return wireguard_helper_root() / "request.json"
 
@@ -43,12 +47,20 @@ def wireguard_helper_task_name() -> str:
     return "PivotSellerWireGuardElevated"
 
 
+def session_gateway_bridge_task_name() -> str:
+    return "PivotSellerSessionGatewayBridge"
+
+
 def wireguard_helper_script_path() -> Path:
     return REPO_ROOT / "seller_client" / "windows_elevated_helper.py"
 
 
 def wireguard_helper_launcher_path() -> Path:
     return wireguard_helper_root() / "run-helper.cmd"
+
+
+def session_gateway_bridge_launcher_path() -> Path:
+    return session_gateway_bridge_root() / "run-gateway-bridge.cmd"
 
 
 def preferred_python_executable() -> str:

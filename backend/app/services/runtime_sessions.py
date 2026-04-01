@@ -8,9 +8,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.platform import RuntimeAccessSession
-from app.services.swarm_manager import SwarmManagerError, remove_code_runtime_service
+from app.services.swarm_manager import SwarmManagerError, remove_runtime_session_bundle
 from app.services.wireguard_server import remove_server_peer
-
 
 TERMINAL_SESSION_STATES = {"completed", "failed", "stopped", "expired"}
 
@@ -32,10 +31,11 @@ def expire_runtime_session(db: Session, session: RuntimeAccessSession) -> Runtim
         return session
 
     try:
-        remove_code_runtime_service(
+        remove_runtime_session_bundle(
             settings,
-            service_name=session.service_name,
+            runtime_service_name=session.service_name,
             config_name=session.config_name,
+            gateway_service_name=session.gateway_service_name,
         )
     except SwarmManagerError:
         # Even if cleanup is partially unavailable, mark the lease as expired.
@@ -47,6 +47,7 @@ def expire_runtime_session(db: Session, session: RuntimeAccessSession) -> Runtim
             pass
 
     session.status = "expired"
+    session.gateway_status = "stopped"
     session.ended_at = utcnow()
     db.commit()
     return session

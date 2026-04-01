@@ -1,9 +1,9 @@
 from app.models.activity import ActivityEvent
 from app.models.base import Base
+from app.models.buyer import BuyerOrder, BuyerWallet, WalletLedger
 from app.models.identity import NodeRegistrationToken, SellerProfile, SessionToken, User
+from app.models.payment import PaymentOrder, PaymentTransaction
 from app.models.platform import (
-    BuyerOrder,
-    BuyerWallet,
     ImageArtifact,
     ImageOffer,
     ImageOfferPriceSnapshot,
@@ -12,7 +12,6 @@ from app.models.platform import (
     ResourceRateCard,
     RuntimeAccessSession,
     UsageCharge,
-    WalletLedger,
 )
 
 __all__ = [
@@ -25,6 +24,8 @@ __all__ = [
     "ImageOfferPriceSnapshot",
     "Node",
     "NodeRegistrationToken",
+    "PaymentOrder",
+    "PaymentTransaction",
     "PriceFeedSnapshot",
     "ResourceRateCard",
     "RuntimeAccessSession",

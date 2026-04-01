@@ -7,9 +7,15 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db import SessionLocal
-from app.models.platform import BuyerWallet, ImageOffer, RuntimeAccessSession, UsageCharge, WalletLedger
+from app.models.platform import (
+    BuyerWallet,
+    ImageOffer,
+    RuntimeAccessSession,
+    UsageCharge,
+    WalletLedger,
+)
 from app.services.runtime_sessions import TERMINAL_SESSION_STATES
-from app.services.swarm_manager import SwarmManagerError, remove_code_runtime_service
+from app.services.swarm_manager import SwarmManagerError, remove_runtime_session_bundle
 from app.services.wireguard_server import remove_server_peer
 
 
@@ -31,7 +37,12 @@ def _ensure_wallet(db: Session, buyer_user_id: int) -> BuyerWallet:
 
 def _terminate_session_for_billing(db: Session, session: RuntimeAccessSession, reason: str) -> RuntimeAccessSession:
     try:
-        remove_code_runtime_service(settings, service_name=session.service_name, config_name=session.config_name)
+        remove_runtime_session_bundle(
+            settings,
+            runtime_service_name=session.service_name,
+            config_name=session.config_name,
+            gateway_service_name=session.gateway_service_name,
+        )
     except SwarmManagerError:
         pass
     if session.buyer_wireguard_public_key:
@@ -40,6 +51,7 @@ def _terminate_session_for_billing(db: Session, session: RuntimeAccessSession, r
         except Exception:
             pass
     session.status = "stopped"
+    session.gateway_status = "stopped"
     session.ended_at = utcnow()
     existing_logs = session.last_logs or ""
     session.last_logs = f"{existing_logs}\n[billing] {reason}".strip()

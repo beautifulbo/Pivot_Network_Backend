@@ -29,8 +29,7 @@ if ! docker inspect "$container_name" >/dev/null 2>&1; then
     --memory "$LOCAL_SELLER_NODE_MEMORY" \
     -e DOCKER_TLS_CERTDIR= \
     -v "$LOCAL_SELLER_DOCKER_VOLUME:/var/lib/docker" \
-    "$LOCAL_SELLER_DOCKER_IMAGE" \
-    --insecure-registry "$REGISTRY_HOST" >/dev/null
+    "$LOCAL_SELLER_DOCKER_IMAGE" >/dev/null
 fi
 
 for _ in $(seq 1 60); do

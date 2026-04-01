@@ -1,22 +1,26 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Pivot Buyer Console</title>
+  <link rel="stylesheet" href="/static/vendor/xterm.css" />
   <style>
     :root {
-      --bg: #f7f2ea;
+      --bg: #eee5d7;
+      --bg-2: #f8f3eb;
       --ink: #152225;
-      --muted: #607174;
-      --line: rgba(21, 34, 37, 0.1);
-      --panel: rgba(255,255,255,0.8);
-      --panel-strong: #0e2628;
-      --ok: #23724f;
-      --warn: #a86720;
-      --error: #b24444;
-      --accent: #0b7a75;
-      --accent-2: #d6722c;
+      --muted: #5d6f6d;
+      --line: rgba(21, 34, 37, 0.14);
+      --panel: rgba(255, 255, 255, 0.82);
+      --panel-dark: rgba(16, 39, 41, 0.96);
+      --accent: #0d7c76;
+      --accent-deep: #0a5a56;
+      --accent-2: #d67b31;
+      --ok: #24734f;
+      --warn: #a16b24;
+      --error: #b54545;
+      --shadow: 0 18px 36px rgba(21, 34, 37, 0.08);
     }
     * { box-sizing: border-box; }
     body {
@@ -24,231 +28,376 @@
       min-height: 100vh;
       color: var(--ink);
       background:
-        radial-gradient(circle at 10% 0%, rgba(11,122,117,0.15), transparent 25%),
-        radial-gradient(circle at 100% 20%, rgba(214,114,44,0.14), transparent 20%),
-        linear-gradient(180deg, #fbf7f0 0%, #efe6d9 100%);
-      font-family: "Aptos", "Segoe UI Variable Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+        radial-gradient(circle at top left, rgba(13, 124, 118, 0.18), transparent 24%),
+        radial-gradient(circle at right 15%, rgba(214, 123, 49, 0.16), transparent 28%),
+        linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 100%);
+      font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", sans-serif;
     }
-    .shell { width: min(1240px, calc(100vw - 28px)); margin: 18px auto 28px; display: grid; gap: 16px; }
-    .hero, .panel {
-      border-radius: 26px;
+    .page {
+      width: min(1380px, calc(100vw - 28px));
+      margin: 18px auto 30px;
+      display: grid;
+      gap: 16px;
+    }
+    .hero,
+    .panel {
+      border-radius: 28px;
       border: 1px solid var(--line);
-      box-shadow: 0 18px 40px rgba(21, 34, 37, 0.08);
+      box-shadow: var(--shadow);
     }
     .hero {
-      padding: 24px;
-      color: #eef6f5;
-      background: linear-gradient(135deg, rgba(14,38,40,0.96), rgba(12,89,86,0.9));
+      padding: 26px;
+      color: #edf8f7;
+      background: linear-gradient(135deg, rgba(16, 39, 41, 0.98), rgba(13, 124, 118, 0.94));
     }
-    .hero h1, .panel h2, .panel h3 { margin: 0; }
-    .hero p { margin: 12px 0 0; max-width: 66ch; color: rgba(238,246,245,0.8); line-height: 1.6; }
-    .layout { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 16px; }
-    .stack { display: grid; gap: 16px; }
-    .panel { background: var(--panel); padding: 18px; }
-    .panel.dark { background: rgba(14,38,40,0.94); color: #eef6f5; }
-    .panel-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-    .panel-head p { margin: 6px 0 0; color: var(--muted); line-height: 1.6; font-size: 14px; }
-    .panel.dark .panel-head p { color: rgba(238,246,245,0.7); }
-    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
-    .wide { grid-column: 1 / -1; }
-    label { display: grid; gap: 8px; font-size: 13px; color: var(--muted); }
-    input, textarea, button { font: inherit; }
-    input, textarea {
+    .hero h1,
+    .panel h2 {
+      margin: 0;
+    }
+    .hero p {
+      margin: 10px 0 0;
+      max-width: 78ch;
+      color: rgba(237, 248, 247, 0.82);
+      line-height: 1.65;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.04fr 0.96fr;
+      gap: 16px;
+    }
+    .stack {
+      display: grid;
+      gap: 16px;
+    }
+    .panel {
+      padding: 18px;
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+    }
+    .panel.dark {
+      background: var(--panel-dark);
+      color: #edf8f7;
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .panel-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.58;
+    }
+    .panel.dark .panel-head p {
+      color: rgba(237, 248, 247, 0.74);
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .wide {
+      grid-column: 1 / -1;
+    }
+    label {
+      display: grid;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    input,
+    textarea,
+    button {
+      font: inherit;
+    }
+    input,
+    textarea {
       width: 100%;
-      border-radius: 14px;
-      border: 1px solid rgba(21,34,37,0.12);
-      padding: 11px 13px;
-      background: rgba(255,255,255,0.88);
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(21, 34, 37, 0.12);
+      background: rgba(255, 255, 255, 0.94);
       color: var(--ink);
     }
-    textarea { min-height: 150px; resize: vertical; }
-    .button-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    textarea {
+      min-height: 160px;
+      resize: vertical;
+    }
     button {
+      min-height: 40px;
+      padding: 0 16px;
       border: 0;
       border-radius: 999px;
-      min-height: 40px;
-      padding: 0 15px;
       cursor: pointer;
+      transition: transform 120ms ease, opacity 120ms ease;
     }
-    .primary { background: linear-gradient(135deg, var(--accent), #095753); color: white; }
-    .secondary { background: rgba(21,34,37,0.08); color: var(--ink); }
-    .danger { background: rgba(178,68,68,0.1); color: var(--error); }
-    .session-list, .activity-list, .detail-list { display: grid; gap: 10px; }
-    .card {
-      border-radius: 16px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.56);
-      padding: 14px;
+    button:hover {
+      transform: translateY(-1px);
     }
-    .panel.dark .card { background: rgba(255,255,255,0.06); }
-    .row { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .primary {
+      color: white;
+      background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+    }
+    .secondary {
+      color: var(--ink);
+      background: rgba(21, 34, 37, 0.08);
+    }
+    .danger {
+      color: var(--error);
+      background: rgba(181, 69, 69, 0.1);
+    }
     .status {
       display: inline-flex;
       align-items: center;
-      padding: 4px 10px;
       border-radius: 999px;
+      padding: 4px 10px;
       font-size: 12px;
       font-weight: 700;
     }
-    .success { background: rgba(35,114,79,0.12); color: var(--ok); }
-    .warning { background: rgba(168,103,32,0.12); color: var(--warn); }
-    .error { background: rgba(178,68,68,0.12); color: var(--error); }
-    .info { background: rgba(11,122,117,0.12); color: var(--accent); }
-    .muted { color: var(--muted); font-size: 13px; line-height: 1.6; white-space: pre-line; }
+    .success { color: var(--ok); background: rgba(36, 115, 79, 0.12); }
+    .warning { color: var(--warn); background: rgba(161, 107, 36, 0.12); }
+    .error { color: var(--error); background: rgba(181, 69, 69, 0.12); }
+    .info { color: var(--accent); background: rgba(13, 124, 118, 0.12); }
+    .list,
+    .detail-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .detail-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .card {
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.58);
+    }
+    .panel.dark .card {
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .muted {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-line;
+      word-break: break-word;
+    }
+    .panel.dark .muted {
+      color: rgba(237, 248, 247, 0.76);
+    }
+    .empty {
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px dashed rgba(21, 34, 37, 0.18);
+      background: rgba(255, 255, 255, 0.45);
+      color: var(--muted);
+    }
     pre {
       margin: 0;
       white-space: pre-wrap;
       word-break: break-word;
-      border-radius: 16px;
-      background: #0d1f20;
-      color: #dce8e7;
-      padding: 16px;
-      max-height: 460px;
+      max-height: 320px;
       overflow: auto;
-    }
-    .empty {
-      border: 1px dashed rgba(21,34,37,0.18);
-      border-radius: 16px;
+      border-radius: 18px;
       padding: 16px;
-      color: var(--muted);
-      background: rgba(255,255,255,0.4);
+      background: #0d1c1d;
+      color: #dbe8e6;
     }
-    @media (max-width: 960px) {
-      .layout, .form-grid { grid-template-columns: 1fr; }
-      .wide { grid-column: auto; }
+    code.inline {
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 12px;
+    }
+    #terminal {
+      height: 400px;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #081415;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 10px;
+    }
+    .helper-code {
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(16, 39, 41, 0.08);
+      word-break: break-all;
+    }
+    @media (max-width: 1020px) {
+      .grid,
+      .form-grid,
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+      .wide {
+        grid-column: auto;
+      }
     }
   </style>
 </head>
 <body>
-  <main class="shell">
+  <main class="page">
     <section class="hero">
       <h1>Pivot Buyer Console</h1>
-      <p>这个本地网页只和本地 buyer 进程通信，再由本地 buyer 进程与平台后端交换必要数据。页面本身不直接碰 Docker、WireGuard、远端主机或 seller 节点。</p>
+      <p>The browser only talks to the local buyer server. The local buyer server creates sessions, performs gateway handshake, manages WireGuard, bridges the browser terminal to the seller gateway, handles order-license entry plus file upload/download, and can now launch local CodeX orchestration jobs against the active runtime session.</p>
     </section>
 
-    <div class="layout">
+    <div class="grid">
       <div class="stack">
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>代码与工作区执行</h2>
-              <p>支持单文件代码、本地 zip/目录、GitHub 仓库。页面只把必要输入交给本地 buyer 进程，再由本地 buyer 进程与平台后端交互。</p>
+              <h2>Create Session</h2>
+              <p>Use direct shell for ad-hoc sessions, or paste a buyer order license token to start a licensed shell without manually stitching backend calls.</p>
             </div>
+            <button class="secondary" onclick="loadDashboard()">Refresh Dashboard</button>
           </div>
           <div class="form-grid">
             <label>
-              平台后端
+              Backend URL
               <input id="backend_url" value="http://127.0.0.1:8000" />
             </label>
             <label>
-              买家邮箱
+              Buyer Email
               <input id="email" value="buyer-local@example.com" />
             </label>
             <label>
-              密码
+              Password
               <input id="password" type="password" value="super-secret-password" />
             </label>
             <label>
               Seller Node Key
-              <input id="seller_node_key" value="" placeholder="从平台商品详情复制 seller node key" />
+              <input id="seller_node_key" value="" placeholder="Paste seller node key from platform" />
+            </label>
+            <label class="wide">
+              License Token
+              <input id="license_token" value="" placeholder="Paste buyer order license token here" />
             </label>
             <label>
-              Runtime 镜像
+              Runtime Image
               <input id="runtime_image" value="python:3.12-alpine" />
             </label>
             <label>
-              租期分钟
+              Lease Minutes
               <input id="lease_minutes" type="number" min="1" max="720" value="30" />
             </label>
             <label>
-              文件名
+              Code File Name
               <input id="code_filename" value="main.py" />
             </label>
             <label class="wide">
-              代码内容
-              <textarea id="code_content">print('hello from buyer runtime')
+              Code Content
+              <textarea id="code_content">print("hello from buyer runtime")
 print(6 * 7)</textarea>
             </label>
           </div>
           <div class="button-row">
-            <button class="secondary" onclick="loadDashboard()">刷新控制面</button>
-            <button class="primary" onclick="runCode()">创建运行时并执行</button>
-            <button class="secondary" onclick="runArchive()">执行本地目录/zip</button>
-            <button class="secondary" onclick="runGitHub()">执行 GitHub 仓库</button>
-            <button class="secondary" onclick="startShell()">创建 shell session</button>
-            <button class="secondary" onclick="fillSample()">填充示例</button>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>Archive / GitHub</h2>
-              <p>本地 buyer 进程会读取目录/zip，或下载 GitHub 仓库后再交给平台。网页本身不直接碰本地文件内容。</p>
-            </div>
-          </div>
-          <div class="form-grid">
-            <label>
-              本地目录或 zip 路径
-              <input id="archive_source_path" value="" />
-            </label>
-            <label>
-              working dir
-              <input id="archive_working_dir" value="" />
-            </label>
-            <label class="wide">
-              run command
-              <input id="archive_run_command" value="python main.py" />
-            </label>
-            <label>
-              GitHub repo URL
-              <input id="github_repo_url" value="" />
-            </label>
-            <label>
-              GitHub ref
-              <input id="github_repo_ref" value="main" />
-            </label>
-            <label>
-              repo working dir
-              <input id="github_working_dir" value="" />
-            </label>
-            <label class="wide">
-              repo run command
-              <input id="github_run_command" value="python main.py" />
-            </label>
+            <button class="primary" onclick="startShell()">Start Shell Session</button>
+            <button class="secondary" onclick="startLicensedShell()">Start Licensed Shell</button>
+            <button class="secondary" onclick="runCode()">Run Inline Code</button>
           </div>
         </section>
 
         <section class="panel dark">
           <div class="panel-head">
             <div>
-              <h2>当前会话</h2>
-              <p>这里显示当前选中的本地 buyer session 状态和输出。</p>
+              <h2>Active Session</h2>
+              <p>Connection state, gateway metadata, WireGuard status, helper readiness, and order-derived fields all show up here.</p>
             </div>
           </div>
-          <div id="active_session" class="detail-list">
-            <div class="empty">还没有 session。</div>
+          <div id="active_session" class="list">
+            <div class="empty">No active session selected yet.</div>
           </div>
         </section>
 
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>容器内 Exec</h2>
-              <p>这里只把命令交给本地 buyer 进程，再由本地 buyer 进程对本机运行中的 runtime 容器执行命令。</p>
+              <h2>Gateway Actions</h2>
+              <p>Exec, logs, terminal, upload, and download all go through the seller session gateway. There is no local Docker fallback in the product path.</p>
             </div>
           </div>
           <div class="form-grid">
             <label class="wide">
-              命令
+              Exec Command
               <input id="exec_command" value="python -V" />
+            </label>
+            <label>
+              Upload Local Path
+              <input id="upload_local_path" value="" placeholder="D:\\work\\sample-or-file" />
+            </label>
+            <label>
+              Upload Remote Dir
+              <input id="upload_remote_path" value="/workspace" />
+            </label>
+            <label>
+              Download Remote Path
+              <input id="download_remote_path" value="/workspace" />
+            </label>
+            <label>
+              Download Local Path
+              <input id="download_local_path" value="" placeholder="D:\\work\\downloaded-result" />
             </label>
           </div>
           <div class="button-row">
-            <button class="secondary" onclick="execActiveSession()">在当前 session 执行命令</button>
-            <button class="secondary" onclick="renewActiveSession()">续期 30 分钟</button>
-            <button class="secondary" onclick="bootstrapActiveWireGuard()">连接 wg-buyer</button>
-            <button class="secondary" onclick="disconnectActiveWireGuard()">断开 wg-buyer</button>
+            <button class="primary" onclick="connectActiveSession()">Connect Gateway</button>
+            <button class="secondary" onclick="execActiveSession()">Run Exec</button>
+            <button class="secondary" onclick="loadLogs(true)">Load Tail Logs</button>
+            <button class="secondary" onclick="uploadFiles()">Upload Files</button>
+            <button class="secondary" onclick="downloadFiles()">Download Files</button>
+            <button class="secondary" onclick="openTerminal()">Open Terminal</button>
+            <button class="secondary" onclick="closeTerminal()">Close Terminal</button>
+            <button class="danger" onclick="stopActiveSession()">Stop Session</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>CodeX Orchestration</h2>
+              <p>Run local CodeX against the selected buyer session. CodeX edits the chosen local workspace, uses buyer MCP tools to connect or exec in the container, uploads local files to the runtime, and downloads generated results back to the workstation.</p>
+            </div>
+          </div>
+          <div id="codex_status" class="list">
+            <div class="empty">Waiting for CodeX readiness.</div>
+          </div>
+          <div class="form-grid" style="margin-top: 14px;">
+            <label class="wide">
+              Workspace Path
+              <input id="codex_workspace_path" value="D:\AI\Pivot_backend_build_team\.cache\buyer-codex-workspace" />
+            </label>
+            <label>
+              CodeX Model
+              <input id="codex_model" value="" placeholder="Optional override, e.g. gpt-5.4" />
+            </label>
+            <label>
+              Selected Session
+              <input id="codex_selected_session" value="" readonly />
+            </label>
+            <label class="wide">
+              Natural-Language Task
+              <textarea id="codex_prompt">Inspect the selected buyer runtime, make or update the local files needed for the task in this workspace, upload what the container needs, run the container commands to verify the result, and download any useful output back into this workspace.</textarea>
+            </label>
+          </div>
+          <div class="button-row">
+            <button class="primary" onclick="startCodexJob()">Run CodeX</button>
+            <button class="secondary" onclick="refreshCurrentCodexJob()">Refresh CodeX Job</button>
+            <button class="danger" onclick="cancelCurrentCodexJob()">Cancel CodeX Job</button>
           </div>
         </section>
       </div>
@@ -257,46 +406,88 @@ print(6 * 7)</textarea>
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>本地 Buyer Sessions</h2>
-              <p>这些 session 保存在本地 buyer 进程内，只用于页面操作和轮询。</p>
+              <h2>Helper Status</h2>
+              <p>If the local WireGuard helper is missing on Windows, connect stops at <code class="inline">handshaken</code>. This panel shows the install hint and the apply command.</p>
             </div>
           </div>
-          <div id="session_list" class="session-list">
-            <div class="empty">还没有 buyer session。</div>
+          <div id="helper_status" class="list">
+            <div class="empty">Waiting for dashboard.</div>
           </div>
         </section>
 
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>本地动作日志</h2>
-              <p>这里只记录本地 buyer 页面发起的动作。</p>
+              <h2>Buyer Sessions</h2>
+              <p>The local buyer server caches all sessions here so the browser can reconnect, inspect state, and continue working through the same terminal bridge.</p>
             </div>
           </div>
-          <div id="activity_list" class="activity-list">
-            <div class="empty">还没有动作日志。</div>
+          <div id="session_list" class="list">
+            <div class="empty">No buyer sessions yet.</div>
           </div>
         </section>
 
         <section class="panel dark">
           <div class="panel-head">
             <div>
-              <h2>原始输出</h2>
+              <h2>Interactive Terminal</h2>
+              <p>The browser connects to the local buyer server, and the local buyer server bridges the terminal websocket to the seller gateway over the active WireGuard path.</p>
             </div>
           </div>
-          <pre id="output">等待初始化。</pre>
+          <div id="terminal"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Logs</h2>
+            </div>
+          </div>
+          <pre id="logs_view">Waiting for logs.</pre>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>CodeX Jobs</h2>
+              <p>Recent orchestration runs, live stdout, and the final assistant message from local CodeX.</p>
+            </div>
+          </div>
+          <div id="codex_jobs" class="list">
+            <div class="empty">No CodeX jobs yet.</div>
+          </div>
+          <pre id="codex_logs_view">Waiting for CodeX logs.</pre>
+          <pre id="codex_summary_view">Waiting for CodeX summary.</pre>
+        </section>
+
+        <section class="panel dark">
+          <div class="panel-head">
+            <div>
+              <h2>Raw Response</h2>
+            </div>
+          </div>
+          <pre id="raw_output">Waiting for initialization.</pre>
         </section>
       </div>
     </div>
   </main>
 
+  <script src="/static/vendor/xterm.js"></script>
+  <script src="/static/vendor/xterm-addon-fit.js"></script>
   <script>
-    const state = { dashboard: null, currentLocalId: null };
+    const state = {
+      dashboard: null,
+      currentLocalId: null,
+      currentCodexJobId: null,
+      terminal: null,
+      fitAddon: null,
+      terminalSocket: null,
+      terminalReady: false,
+    };
 
-    function valueOf(id) {
-      return document.getElementById(id).value;
-    }
-
+    function $(id) { return document.getElementById(id); }
+    function valueOf(id) { return $(id).value; }
+    function leaseMinutes() { return Number.parseInt(valueOf("lease_minutes") || "30", 10) || 30; }
     function escapeHtml(value) {
       return String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -305,62 +496,61 @@ print(6 * 7)</textarea>
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
     }
-
     function statusClass(status) {
-      if (status === "completed" || status === "running" || status === "success") return "success";
-      if (status === "failed" || status === "error") return "error";
-      if (status === "starting" || status === "created") return "warning";
+      if (["success", "running", "connected", "active", "completed", "online"].includes(status)) return "success";
+      if (["warning", "pending", "created", "handshaken", "starting"].includes(status)) return "warning";
+      if (["error", "failed", "stopped", "expired", "activation_failed"].includes(status)) return "error";
       return "info";
     }
-
-    function setOutput(title, payload) {
-      document.getElementById("output").textContent = `=== ${title} ===\n${JSON.stringify(payload, null, 2)}`;
+    function setRaw(title, payload) {
+      $("raw_output").textContent = `=== ${title} ===\n${JSON.stringify(payload, null, 2)}`;
     }
-
-    function leaseMinutes() {
-      return Number.parseInt(valueOf("lease_minutes") || "30", 10) || 30;
-    }
-
     async function fetchJson(url, options = {}) {
       const response = await fetch(url, options);
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(JSON.stringify(data));
-      }
+      if (!response.ok) throw new Error(JSON.stringify(data));
       return data;
     }
-
     async function postJson(url, payload, title) {
       const data = await fetchJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      setOutput(title, data);
+      setRaw(title, data);
       return data;
     }
-
-    function renderActivity(items) {
-      const root = document.getElementById("activity_list");
-      if (!items?.length) {
-        root.innerHTML = '<div class="empty">还没有动作日志。</div>';
+    function activeSession() {
+      return state.dashboard?.sessions?.find((item) => item.local_id === state.currentLocalId) || null;
+    }
+    function activeCodexJob() {
+      return state.dashboard?.codex?.jobs?.find((item) => item.job_id === state.currentCodexJobId) || null;
+    }
+    function renderHelper(helper) {
+      const root = $("helper_status");
+      if (!helper) {
+        root.innerHTML = '<div class="empty">No helper status yet.</div>';
         return;
       }
-      root.innerHTML = items.map((item) => `
+      root.innerHTML = `
         <div class="card">
           <div class="row">
-            <strong>${escapeHtml(item.title || item.action || "activity")}</strong>
-            <span class="status ${statusClass(item.status)}">${escapeHtml(item.status || "info")}</span>
+            <strong>WireGuard Helper</strong>
+            <span class="status ${statusClass(helper.wireguard_helper_ready ? "success" : "warning")}">${helper.wireguard_helper_ready ? "ready" : "needs attention"}</span>
           </div>
-          <div class="muted">${escapeHtml(item.summary || "")}</div>
+          <div class="muted">error=${escapeHtml(helper.wireguard_helper_error || "-")}</div>
+          <div class="muted">${escapeHtml(helper.wireguard_helper_install_hint || "No extra action is required right now.")}</div>
+          <div class="helper-code">${escapeHtml(helper.wireguard_helper_apply_command || "-")}</div>
+          <div class="button-row">
+            <button class="primary" onclick="installHelper()">Prepare Helper</button>
+          </div>
         </div>
-      `).join("");
+      `;
     }
-
     function renderSessions(items) {
-      const root = document.getElementById("session_list");
+      const root = $("session_list");
       if (!items?.length) {
-        root.innerHTML = '<div class="empty">还没有 buyer session。</div>';
+        root.innerHTML = '<div class="empty">No buyer sessions yet.</div>';
         return;
       }
       root.innerHTML = items.map((item) => `
@@ -369,51 +559,140 @@ print(6 * 7)</textarea>
             <strong>${escapeHtml(item.service_name || item.code_filename || item.local_id)}</strong>
             <span class="status ${statusClass(item.status)}">${escapeHtml(item.status || "unknown")}</span>
           </div>
-          <div class="muted">seller=${escapeHtml(item.seller_node_key)} | session=${escapeHtml(item.session_id)} | mode=${escapeHtml(item.session_mode || "code_run")} | wg=${escapeHtml(item.wireguard_status || "-")}</div>
+          <div class="muted">session=${escapeHtml(item.session_id)} | seller=${escapeHtml(item.seller_node_key || "-")} | mode=${escapeHtml(item.session_mode || "-")}</div>
+          <div class="muted">source=${escapeHtml(item.source_type || "-")} | order=${escapeHtml(item.order_id || "-")} | connection=${escapeHtml(item.connection_status || "pending")}</div>
+          <div class="muted">gateway=${escapeHtml(item.gateway_host || "-")}:${escapeHtml(item.gateway_port || "-")} | wg=${escapeHtml(item.wireguard_status || "-")} | features=${escapeHtml((item.gateway_supported_features || []).join(", ") || "-")}</div>
           <div class="button-row">
-            <button class="secondary" onclick="refreshSession('${escapeHtml(item.local_id)}')">刷新</button>
-            <button class="secondary" onclick="renewSession('${escapeHtml(item.local_id)}')">续期</button>
-            <button class="secondary" onclick="bootstrapWireGuard('${escapeHtml(item.local_id)}')">连接 WG</button>
-            <button class="secondary" onclick="disconnectWireGuard('${escapeHtml(item.local_id)}')">断开 WG</button>
-            <button class="danger" onclick="stopSession('${escapeHtml(item.local_id)}')">停止</button>
-            <button class="secondary" onclick="selectSession('${escapeHtml(item.local_id)}')">查看输出</button>
+            <button class="secondary" onclick="selectSession('${escapeHtml(item.local_id)}')">Select</button>
+            <button class="primary" onclick="connectSession('${escapeHtml(item.local_id)}')">Connect</button>
+            <button class="danger" onclick="stopSession('${escapeHtml(item.local_id)}')">Stop</button>
           </div>
         </div>
       `).join("");
     }
-
-    function renderActiveSession(session) {
-      const root = document.getElementById("active_session");
+    function renderActive(session) {
+      const root = $("active_session");
       if (!session) {
-        root.innerHTML = '<div class="empty">还没有 session。</div>';
+        root.innerHTML = '<div class="empty">No active session selected yet.</div>';
+        $("codex_selected_session").value = "";
         return;
       }
+      $("codex_selected_session").value = session.local_id || "";
       root.innerHTML = `
         <div class="card">
           <div class="row">
             <strong>${escapeHtml(session.service_name || session.code_filename || session.local_id)}</strong>
-            <span class="status ${statusClass(session.status)}">${escapeHtml(session.status || "unknown")}</span>
+            <span class="status ${statusClass(session.connection_status || session.status || "info")}">${escapeHtml(session.connection_status || session.status || "unknown")}</span>
           </div>
-          <div class="muted">seller=${escapeHtml(session.seller_node_key)} | session=${escapeHtml(session.session_id)} | mode=${escapeHtml(session.session_mode || "code_run")} | relay=${escapeHtml(session.relay_endpoint || "-")}</div>
-          <div class="muted">lease=${escapeHtml(session.expires_at || "-")} | network=${escapeHtml(session.network_mode || "-")} | wg=${escapeHtml(session.wireguard_status || "-")} ${escapeHtml(session.wireguard_client_address || "")} -> ${escapeHtml(session.seller_wireguard_target || "")}</div>
+          <div class="detail-grid">
+            <div class="card">
+              <strong>Gateway</strong>
+              <div class="muted">host=${escapeHtml(session.gateway_host || "-")}</div>
+              <div class="muted">access_host=${escapeHtml(session.gateway_access_host || "-")}</div>
+              <div class="muted">port=${escapeHtml(session.gateway_port || "-")}</div>
+              <div class="muted">features=${escapeHtml((session.gateway_supported_features || []).join(", ") || "-")}</div>
+            </div>
+            <div class="card">
+              <strong>WireGuard</strong>
+              <div class="muted">status=${escapeHtml(session.wireguard_status || "-")}</div>
+              <div class="muted">client=${escapeHtml(session.wireguard_client_address || "-")}</div>
+              <div class="muted">seller=${escapeHtml(session.seller_wireguard_target || "-")}</div>
+            </div>
+            <div class="card">
+              <strong>Helper</strong>
+              <div class="muted">ready=${escapeHtml(String(session.wireguard_helper_ready))}</div>
+              <div class="muted">error=${escapeHtml(session.wireguard_helper_error || "-")}</div>
+            </div>
+            <div class="card">
+              <strong>Lease</strong>
+              <div class="muted">expires=${escapeHtml(session.expires_at || "-")}</div>
+              <div class="muted">gateway_status=${escapeHtml(session.gateway_status || "-")}</div>
+              <div class="muted">exec_mode=${escapeHtml(session.exec_mode || "-")}</div>
+            </div>
+            <div class="card">
+              <strong>Source</strong>
+              <div class="muted">source_type=${escapeHtml(session.source_type || "-")}</div>
+              <div class="muted">order_id=${escapeHtml(session.order_id || "-")}</div>
+              <div class="muted">license=${escapeHtml(session.license_token || "-")}</div>
+            </div>
+            <div class="card">
+              <strong>Buyer</strong>
+              <div class="muted">email=${escapeHtml(session.buyer_email || "-")}</div>
+              <div class="muted">seller_node_key=${escapeHtml(session.seller_node_key || "-")}</div>
+              <div class="muted">runtime_image=${escapeHtml(session.runtime_image || "-")}</div>
+            </div>
+          </div>
         </div>
-        <pre>${escapeHtml(session.logs || "")}</pre>
       `;
     }
-
+    function renderCodexStatus(codex) {
+      const root = $("codex_status");
+      if (!codex) {
+        root.innerHTML = '<div class="empty">No CodeX status yet.</div>';
+        return;
+      }
+      const cliReady = Boolean(codex.codex_ready && codex.codex_cli);
+      const mcpReady = Boolean(codex.buyer_mcp_attached);
+      root.innerHTML = `
+        <div class="card">
+          <div class="row">
+            <strong>Local CodeX</strong>
+            <span class="status ${statusClass(cliReady ? "success" : "warning")}">${cliReady ? "ready" : "missing"}</span>
+          </div>
+          <div class="muted">cli=${escapeHtml(codex.codex_cli || "-")}</div>
+          <div class="muted">buyer MCP=${escapeHtml(String(mcpReady))} | seller MCP=${escapeHtml(String(Boolean(codex.seller_mcp_attached)))}</div>
+          <div class="muted">config=${escapeHtml(codex.codex_config_path || "-")}</div>
+          <div class="muted">jobs=${escapeHtml(codex.job_count || 0)}</div>
+          ${!mcpReady && codex.windows_apply_command ? `<div class="helper-code">${escapeHtml(codex.windows_apply_command)}</div>` : ""}
+        </div>
+      `;
+    }
+    function renderCodexJobs(items) {
+      const root = $("codex_jobs");
+      if (!items?.length) {
+        root.innerHTML = '<div class="empty">No CodeX jobs yet.</div>';
+        $("codex_logs_view").textContent = "Waiting for CodeX logs.";
+        $("codex_summary_view").textContent = "Waiting for CodeX summary.";
+        return;
+      }
+      root.innerHTML = items.map((item) => `
+        <div class="card">
+          <div class="row">
+            <strong>${escapeHtml(item.workspace_path || item.job_id)}</strong>
+            <span class="status ${statusClass(item.status || "info")}">${escapeHtml(item.status || "unknown")}</span>
+          </div>
+          <div class="muted">job=${escapeHtml(item.job_id)} | session=${escapeHtml(item.local_id || "-")}</div>
+          <div class="muted">model=${escapeHtml(item.model || "-")} | created=${escapeHtml(item.created_at || "-")}</div>
+          <div class="muted">${escapeHtml(item.prompt_excerpt || "")}</div>
+          <div class="button-row">
+            <button class="secondary" onclick="selectCodexJob('${escapeHtml(item.job_id)}')">Select Job</button>
+            <button class="secondary" onclick="refreshCodexJob('${escapeHtml(item.job_id)}')">Refresh</button>
+            <button class="danger" onclick="cancelCodexJob('${escapeHtml(item.job_id)}')">Cancel</button>
+          </div>
+        </div>
+      `).join("");
+      if (!state.currentCodexJobId && items.length) {
+        state.currentCodexJobId = items[0].job_id;
+      }
+      renderCodexJob(activeCodexJob());
+    }
+    function renderCodexJob(job) {
+      $("codex_logs_view").textContent = job?.logs || "Waiting for CodeX logs.";
+      $("codex_summary_view").textContent = job?.final_message || "Waiting for CodeX summary.";
+    }
     async function loadDashboard() {
       const data = await fetchJson("/api/dashboard");
       state.dashboard = data;
+      renderHelper(data.wireguard_helper);
+      renderCodexStatus(data.codex);
       renderSessions(data.sessions || []);
-      renderActivity(data.local_activity || []);
-      const active = (data.sessions || []).find((item) => item.local_id === state.currentLocalId) || data.sessions?.[0] || null;
-      if (active) {
-        state.currentLocalId = active.local_id;
+      renderCodexJobs(data.codex?.jobs || []);
+      if (!state.currentLocalId && data.sessions?.length) {
+        state.currentLocalId = data.sessions[0].local_id;
       }
-      renderActiveSession(active);
-      setOutput("dashboard", data);
+      renderActive(activeSession());
+      setRaw("dashboard", data);
     }
-
     async function runCode() {
       const data = await postJson("/api/runtime/run-code", {
         backend_url: valueOf("backend_url"),
@@ -427,42 +706,7 @@ print(6 * 7)</textarea>
       }, "run code");
       state.currentLocalId = data.session.local_id;
       await loadDashboard();
-      await refreshSession(state.currentLocalId);
     }
-
-    async function runArchive() {
-      const data = await postJson("/api/runtime/run-archive", {
-        backend_url: valueOf("backend_url"),
-        email: valueOf("email"),
-        password: valueOf("password"),
-        seller_node_key: valueOf("seller_node_key"),
-        source_path: valueOf("archive_source_path"),
-        runtime_image: valueOf("runtime_image"),
-        working_dir: valueOf("archive_working_dir"),
-        run_command: valueOf("archive_run_command"),
-        requested_duration_minutes: leaseMinutes(),
-      }, "run archive");
-      setOutput("run archive", data);
-      await loadDashboard();
-    }
-
-    async function runGitHub() {
-      const data = await postJson("/api/runtime/run-github", {
-        backend_url: valueOf("backend_url"),
-        email: valueOf("email"),
-        password: valueOf("password"),
-        seller_node_key: valueOf("seller_node_key"),
-        repo_url: valueOf("github_repo_url"),
-        repo_ref: valueOf("github_repo_ref"),
-        runtime_image: valueOf("runtime_image"),
-        working_dir: valueOf("github_working_dir"),
-        run_command: valueOf("github_run_command"),
-        requested_duration_minutes: leaseMinutes(),
-      }, "run github");
-      setOutput("run github", data);
-      await loadDashboard();
-    }
-
     async function startShell() {
       const data = await postJson("/api/runtime/start-shell", {
         backend_url: valueOf("backend_url"),
@@ -474,99 +718,231 @@ print(6 * 7)</textarea>
       }, "start shell");
       state.currentLocalId = data.session.local_id;
       await loadDashboard();
-      await refreshSession(state.currentLocalId);
     }
-
-    async function refreshSession(localId) {
-      const data = await fetchJson(`/api/runtime/sessions/${encodeURIComponent(localId)}`);
-      state.currentLocalId = localId;
-      renderActiveSession(data.session);
-      setOutput("session refresh", data);
-      await loadDashboard();
-    }
-
-    async function stopSession(localId) {
-      const data = await postJson(`/api/runtime/sessions/${encodeURIComponent(localId)}/stop`, {}, "stop session");
-      state.currentLocalId = localId;
-      renderActiveSession(data.session);
-      await loadDashboard();
-    }
-
-    async function execActiveSession() {
-      if (!state.currentLocalId) {
-        setOutput("exec failed", { ok: false, error: "no_active_session" });
+    async function startLicensedShell() {
+      const licenseToken = valueOf("license_token").trim();
+      if (!licenseToken) {
+        setRaw("licensed shell failed", { ok: false, error: "missing_license_token" });
         return;
       }
+      const data = await postJson("/api/runtime/start-licensed-shell", {
+        backend_url: valueOf("backend_url"),
+        email: valueOf("email"),
+        password: valueOf("password"),
+        license_token: licenseToken,
+      }, "start licensed shell");
+      state.currentLocalId = data.session.local_id;
+      await loadDashboard();
+    }
+    async function connectSession(localId) {
+      const data = await postJson(`/api/runtime/sessions/${encodeURIComponent(localId)}/connect`, {
+        activate_wireguard: true,
+      }, "connect session");
+      state.currentLocalId = localId;
+      await loadDashboard();
+      renderActive(activeSession());
+      return data;
+    }
+    async function connectActiveSession() {
+      if (!state.currentLocalId) return setRaw("connect failed", { ok: false, error: "no_active_session" });
+      await connectSession(state.currentLocalId);
+    }
+    async function execActiveSession() {
+      if (!state.currentLocalId) return setRaw("exec failed", { ok: false, error: "no_active_session" });
       const data = await postJson(`/api/runtime/sessions/${encodeURIComponent(state.currentLocalId)}/exec`, {
         command: valueOf("exec_command"),
-      }, "exec command");
-      renderActiveSession(data.session);
+      }, "gateway exec");
+      $("logs_view").textContent = data.session.logs || "No logs available.";
+      await loadDashboard();
+      renderActive(activeSession());
+      return data;
+    }
+    async function uploadFiles() {
+      if (!state.currentLocalId) return setRaw("upload failed", { ok: false, error: "no_active_session" });
+      const data = await postJson(`/api/runtime/sessions/${encodeURIComponent(state.currentLocalId)}/files/upload`, {
+        local_path: valueOf("upload_local_path"),
+        remote_path: valueOf("upload_remote_path") || "/workspace",
+      }, "gateway upload");
+      await loadDashboard();
+      renderActive(activeSession());
+      return data;
+    }
+    async function downloadFiles() {
+      if (!state.currentLocalId) return setRaw("download failed", { ok: false, error: "no_active_session" });
+      const data = await postJson(`/api/runtime/sessions/${encodeURIComponent(state.currentLocalId)}/files/download`, {
+        remote_path: valueOf("download_remote_path"),
+        local_path: valueOf("download_local_path"),
+      }, "gateway download");
+      await loadDashboard();
+      renderActive(activeSession());
+      return data;
+    }
+    async function loadLogs(tail = false) {
+      if (!state.currentLocalId) return setRaw("logs failed", { ok: false, error: "no_active_session" });
+      const query = new URLSearchParams({ cursor: "0", limit: "200", tail: String(Boolean(tail)) });
+      const data = await fetchJson(`/api/runtime/sessions/${encodeURIComponent(state.currentLocalId)}/logs?${query.toString()}`);
+      $("logs_view").textContent = data.log_result.logs || "No logs available.";
+      setRaw("gateway logs", data);
       await loadDashboard();
     }
-
-    async function renewSession(localId) {
-      const data = await postJson(`/api/runtime/sessions/${encodeURIComponent(localId)}/renew`, {
-        additional_minutes: leaseMinutes(),
-      }, "renew session");
+    async function installHelper() {
+      const data = await postJson("/api/runtime/wireguard-helper/install", {
+        attempt_launch: true,
+      }, "wireguard helper install");
+      renderHelper(data.wireguard_helper);
+      await loadDashboard();
+    }
+    function selectCodexJob(jobId) {
+      state.currentCodexJobId = jobId;
+      renderCodexJob(activeCodexJob());
+    }
+    async function refreshCodexJob(jobId) {
+      const targetJobId = jobId || state.currentCodexJobId;
+      if (!targetJobId) return setRaw("codex refresh failed", { ok: false, error: "no_codex_job" });
+      const data = await fetchJson(`/api/codex/jobs/${encodeURIComponent(targetJobId)}`);
+      setRaw("codex job", data);
+      state.currentCodexJobId = targetJobId;
+      await loadDashboard();
+      renderCodexJob(data.job || activeCodexJob());
+      return data;
+    }
+    async function refreshCurrentCodexJob() {
+      return refreshCodexJob(state.currentCodexJobId);
+    }
+    async function startCodexJob() {
+      if (!state.currentLocalId) return setRaw("codex start failed", { ok: false, error: "no_active_session" });
+      const data = await postJson("/api/codex/jobs", {
+        local_id: state.currentLocalId,
+        workspace_path: valueOf("codex_workspace_path"),
+        prompt: valueOf("codex_prompt"),
+        model: valueOf("codex_model"),
+      }, "codex start");
+      state.currentCodexJobId = data.job.job_id;
+      await loadDashboard();
+      renderCodexJob(activeCodexJob());
+      return data;
+    }
+    async function cancelCodexJob(jobId) {
+      const targetJobId = jobId || state.currentCodexJobId;
+      if (!targetJobId) return setRaw("codex cancel failed", { ok: false, error: "no_codex_job" });
+      const data = await postJson(`/api/codex/jobs/${encodeURIComponent(targetJobId)}/cancel`, {}, "codex cancel");
+      state.currentCodexJobId = targetJobId;
+      await loadDashboard();
+      renderCodexJob(data.job || activeCodexJob());
+      return data;
+    }
+    async function cancelCurrentCodexJob() {
+      return cancelCodexJob(state.currentCodexJobId);
+    }
+    async function stopSession(localId) {
+      closeTerminal();
+      const data = await postJson(`/api/runtime/sessions/${encodeURIComponent(localId)}/stop`, {}, "stop session");
       state.currentLocalId = localId;
-      renderActiveSession(data.session);
+      $("logs_view").textContent = data.session.logs || "Session stopped.";
       await loadDashboard();
+      renderActive(activeSession());
     }
-
-    async function renewActiveSession() {
-      if (!state.currentLocalId) {
-        setOutput("renew failed", { ok: false, error: "no_active_session" });
-        return;
-      }
-      await renewSession(state.currentLocalId);
+    async function stopActiveSession() {
+      if (!state.currentLocalId) return setRaw("stop failed", { ok: false, error: "no_active_session" });
+      await stopSession(state.currentLocalId);
     }
-
-    async function bootstrapWireGuard(localId) {
-      const data = await postJson(`/api/runtime/sessions/${encodeURIComponent(localId)}/wireguard/bootstrap`, {}, "wireguard bootstrap");
-      state.currentLocalId = localId;
-      renderActiveSession(data.session);
-      await loadDashboard();
-    }
-
-    async function bootstrapActiveWireGuard() {
-      if (!state.currentLocalId) {
-        setOutput("wireguard bootstrap failed", { ok: false, error: "no_active_session" });
-        return;
-      }
-      await bootstrapWireGuard(state.currentLocalId);
-    }
-
-    async function disconnectWireGuard(localId) {
-      const data = await postJson(`/api/runtime/sessions/${encodeURIComponent(localId)}/wireguard/disconnect`, {}, "wireguard disconnect");
-      state.currentLocalId = localId;
-      renderActiveSession(data.session);
-      await loadDashboard();
-    }
-
-    async function disconnectActiveWireGuard() {
-      if (!state.currentLocalId) {
-        setOutput("wireguard disconnect failed", { ok: false, error: "no_active_session" });
-        return;
-      }
-      await disconnectWireGuard(state.currentLocalId);
-    }
-
     function selectSession(localId) {
       state.currentLocalId = localId;
-      const session = state.dashboard?.sessions?.find((item) => item.local_id === localId) || null;
-      renderActiveSession(session);
+      renderActive(activeSession());
     }
-
-    function fillSample() {
-      document.getElementById("code_content").value = "print('hello from buyer runtime')\\nprint(6 * 7)\\n";
-      document.getElementById("code_filename").value = "main.py";
-      document.getElementById("archive_run_command").value = "python main.py";
-      document.getElementById("github_run_command").value = "python main.py";
+    function ensureTerminal() {
+      if (state.terminalReady) return;
+      if (!window.Terminal || !window.FitAddon) {
+        $("terminal").textContent = "xterm.js failed to load.";
+        return;
+      }
+      state.terminal = new Terminal({
+        fontFamily: '"Cascadia Mono", "Consolas", monospace',
+        fontSize: 13,
+        cursorBlink: true,
+        theme: {
+          background: "#081415",
+          foreground: "#dbe9e7",
+          cursor: "#f4ebcc",
+          black: "#0c1718",
+          blue: "#69b6f3",
+          green: "#4fd48b",
+          yellow: "#f3c969",
+          red: "#ef8f8f",
+        },
+      });
+      state.fitAddon = new FitAddon.FitAddon();
+      state.terminal.loadAddon(state.fitAddon);
+      state.terminal.open($("terminal"));
+      state.fitAddon.fit();
+      state.terminal.writeln("Pivot terminal ready. Connect Gateway first.");
+      state.terminal.onData((data) => {
+        if (state.terminalSocket?.readyState === WebSocket.OPEN) {
+          state.terminalSocket.send(JSON.stringify({ type: "input", data }));
+        }
+      });
+      window.addEventListener("resize", () => {
+        if (!state.fitAddon || !state.terminal || state.terminalSocket?.readyState !== WebSocket.OPEN) return;
+        state.fitAddon.fit();
+        state.terminalSocket.send(JSON.stringify({
+          type: "resize",
+          rows: state.terminal.rows,
+          cols: state.terminal.cols,
+        }));
+      });
+      state.terminalReady = true;
+    }
+    function closeTerminal() {
+      if (state.terminalSocket) {
+        state.terminalSocket.close();
+        state.terminalSocket = null;
+      }
+    }
+    function openTerminal() {
+      if (!state.currentLocalId) {
+        setRaw("terminal failed", { ok: false, error: "no_active_session" });
+        return;
+      }
+      ensureTerminal();
+      if (!state.terminal) return;
+      closeTerminal();
+      state.fitAddon.fit();
+      state.terminal.clear();
+      state.terminal.writeln(`[connecting terminal for ${state.currentLocalId}]`);
+      const query = new URLSearchParams({
+        rows: String(state.terminal.rows || 24),
+        cols: String(state.terminal.cols || 80),
+      });
+      const wsProtocol = location.protocol === "https:" ? "wss" : "ws";
+      const wsUrl = `${wsProtocol}://${location.host}/api/runtime/sessions/${encodeURIComponent(state.currentLocalId)}/terminal?${query.toString()}`;
+      const socket = new WebSocket(wsUrl);
+      state.terminalSocket = socket;
+      socket.onmessage = (event) => {
+        let payload;
+        try {
+          payload = JSON.parse(event.data);
+        } catch {
+          state.terminal.write(event.data);
+          return;
+        }
+        if (payload.type === "output") state.terminal.write(payload.data || "");
+        if (payload.type === "error") state.terminal.writeln(`\r\n[error] ${payload.message || "unknown"}`);
+        if (payload.type === "exit") state.terminal.writeln(`\r\n[exit code=${payload.exit_code}]`);
+      };
+      socket.onclose = () => {
+        if (state.terminalSocket === socket) state.terminalSocket = null;
+        state.terminal.writeln("\r\n[terminal closed]");
+      };
     }
 
     loadDashboard().catch((error) => {
-      setOutput("init failed", { ok: false, error: String(error) });
+      setRaw("init failed", { ok: false, error: String(error) });
     });
+    window.setInterval(() => {
+      loadDashboard().catch((error) => {
+        setRaw("dashboard refresh failed", { ok: false, error: String(error) });
+      });
+    }, 15000);
   </script>
 </body>
 </html>

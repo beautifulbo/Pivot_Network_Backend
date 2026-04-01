@@ -4,10 +4,13 @@ from pathlib import Path
 from seller_client.agent_mcp import (
     _build_remote_image_ref,
     _config_path,
+    _normalize_registry_reference,
+    _registry_base_url,
     _wireguard_config_path,
     bootstrap_wireguard_from_platform,
     connect_server_vpn,
     configure_environment,
+    configure_registry_trust,
     ensure_joined_to_platform_swarm,
     explain_seller_intent,
     environment_check,
@@ -57,6 +60,17 @@ def test_configure_environment_writes_client_config(tmp_path: Path) -> None:
     assert config["data"]["wireguard"]["interface"] == "wg-test"
 
 
+def test_configure_environment_upgrades_legacy_registry_to_public_domain(tmp_path: Path) -> None:
+    response = configure_environment(
+        registry="81.70.52.75:5000",
+        state_dir=str(tmp_path),
+    )
+
+    assert response["ok"] is True
+    config = get_client_config(state_dir=str(tmp_path))
+    assert config["data"]["server"]["registry"] == "pivotcompute.store"
+
+
 def test_prepare_wireguard_profile_writes_expected_config(tmp_path: Path) -> None:
     configure_environment(state_dir=str(tmp_path), wireguard_interface="wg-seller")
 
@@ -84,10 +98,18 @@ def test_build_remote_image_ref_uses_registry_and_repository() -> None:
     remote_ref = _build_remote_image_ref(
         repository="seller/demo",
         remote_tag="v1",
-        registry="81.70.52.75:5000",
+        registry="pivotcompute.store",
     )
 
-    assert remote_ref == "81.70.52.75:5000/seller/demo:v1"
+    assert remote_ref == "pivotcompute.store/seller/demo:v1"
+
+
+def test_registry_base_url_defaults_to_https() -> None:
+    assert _registry_base_url("pivotcompute.store") == "https://pivotcompute.store"
+
+
+def test_normalize_registry_reference_upgrades_legacy_ip_registry() -> None:
+    assert _normalize_registry_reference("81.70.52.75:5000") == "pivotcompute.store"
 
 
 def test_explain_seller_intent_extracts_share_percent() -> None:
@@ -159,7 +181,7 @@ def test_bootstrap_wireguard_from_platform_prepares_profile(tmp_path: Path, monk
             "data": {
                 "server_public_key": "server-public",
                 "client_address": "10.88.0.20/32",
-                "server_endpoint_host": "81.70.52.75",
+                "server_endpoint_host": "pivotcompute.store",
                 "server_endpoint_port": 51820,
                 "allowed_ips": "10.88.0.0/16",
                 "interface_name": "wg-seller",
@@ -200,7 +222,7 @@ def test_fetch_swarm_worker_join_token_updates_config(tmp_path: Path, monkeypatc
             "body": json.dumps(
                 {
                     "join_token": "SWMTKN-test",
-                    "manager_host": "81.70.52.75",
+                    "manager_host": "pivotcompute.store",
                     "manager_port": 2377,
                 }
             ),
@@ -211,7 +233,7 @@ def test_fetch_swarm_worker_join_token_updates_config(tmp_path: Path, monkeypatc
 
     assert response["ok"] is True
     updated = get_client_config(mask_secrets=False, state_dir=str(tmp_path))["data"]
-    assert updated["server"]["manager_host"] == "81.70.52.75"
+    assert updated["server"]["manager_host"] == "pivotcompute.store"
     assert updated["server"]["manager_port"] == 2377
 
 
@@ -233,7 +255,7 @@ def test_connect_server_vpn_uses_elevated_helper_on_access_denied(tmp_path: Path
         server_public_key="server-public",
         client_private_key="client-private",
         client_address="10.66.66.10/32",
-        endpoint_host="81.70.52.75",
+        endpoint_host="pivotcompute.store",
         endpoint_port=45182,
         allowed_ips="10.66.66.0/24",
         interface_name="wg-seller",
@@ -389,7 +411,7 @@ def test_report_image_to_platform_uses_extended_timeout(tmp_path: Path, monkeypa
     response = report_image_to_platform(
         repository="seller/demo",
         tag="v1",
-        registry="registry.example.com:5000",
+        registry="https://pivotcompute.store",
         digest="sha256:test",
         source_image="python:3.12-alpine",
         state_dir=str(tmp_path),
@@ -399,3 +421,74 @@ def test_report_image_to_platform_uses_extended_timeout(tmp_path: Path, monkeypa
     assert captured["method"] == "POST"
     assert captured["path"] == "/api/v1/platform/images/report"
     assert captured["timeout_seconds"] == 240
+
+
+def test_report_image_to_platform_normalizes_registry_reference(tmp_path: Path, monkeypatch) -> None:
+    configure_environment(state_dir=str(tmp_path), backend_url="http://127.0.0.1:8000")
+    config = get_client_config(mask_secrets=False, state_dir=str(tmp_path))["data"]
+    config["auth"]["node_registration_token"] = "node-token"
+    config["auth"]["device_fingerprint"] = "device-001"
+    _config_path(tmp_path).write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def fake_run_backend_request(method, path, **kwargs):
+        captured["payload"] = kwargs["payload"]
+        return {"ok": True, "body": json.dumps({"id": 1})}
+
+    monkeypatch.setattr("seller_client.agent_mcp._run_backend_request", fake_run_backend_request)
+
+    response = report_image_to_platform(
+        repository="seller/demo",
+        tag="v1",
+        registry="https://pivotcompute.store",
+        state_dir=str(tmp_path),
+    )
+
+    assert response["ok"] is True
+    assert captured["payload"]["registry"] == "pivotcompute.store"
+
+
+def test_configure_registry_trust_checks_public_https_registry(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "seller_client.agent_mcp.fetch_registry_certificate",
+        lambda registry: {
+            "ok": True,
+            "registry": registry,
+            "publicly_trusted": True,
+            "trust_probe": {"ok": True, "trusted": True},
+        },
+    )
+    monkeypatch.setattr(
+        "seller_client.agent_mcp.probe_registry",
+        lambda registry: {"ok": True, "status": 200, "url": f"https://{registry}/v2/_catalog"},
+    )
+
+    response = configure_registry_trust("pivotcompute.store")
+
+    assert response["ok"] is True
+    assert response["trust_mode"] == "public_https"
+    assert response["probe_result"]["status"] == 200
+    assert response["legacy_input_upgraded"] is False
+
+
+def test_configure_registry_trust_upgrades_legacy_ip_input(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "seller_client.agent_mcp.fetch_registry_certificate",
+        lambda registry: {
+            "ok": True,
+            "registry": registry,
+            "publicly_trusted": True,
+            "trust_probe": {"ok": True, "trusted": True},
+        },
+    )
+    monkeypatch.setattr(
+        "seller_client.agent_mcp.probe_registry",
+        lambda registry: {"ok": True, "status": 200, "url": f"https://{registry}/v2/_catalog"},
+    )
+
+    response = configure_registry_trust("81.70.52.75:5000")
+
+    assert response["ok"] is True
+    assert response["registry"] == "pivotcompute.store"
+    assert response["legacy_input_upgraded"] is True

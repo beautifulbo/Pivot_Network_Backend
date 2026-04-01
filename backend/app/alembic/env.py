@@ -13,6 +13,7 @@ assert config.config_file_name is not None
 fileConfig(config.config_file_name)
 
 from app.core.config import settings  # noqa: E402
+import app.models  # noqa: F401, E402
 from app.models.base import Base  # noqa: E402
 
 target_metadata = Base.metadata

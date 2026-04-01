@@ -61,6 +61,45 @@ def login_or_register(backend_url: str, email: str, password: str, display_name:
     }
 
 
+def redeem_connect_code(*, backend_url: str, connect_code: str) -> dict[str, Any]:
+    redeem = request_json(
+        "POST",
+        f"{backend_url.rstrip('/')}/api/v1/buyer/runtime-sessions/redeem",
+        {"connect_code": connect_code},
+    )
+    if not redeem["ok"]:
+        raise RuntimeError(f"redeem_connect_code_failed: {redeem['data']}")
+    return redeem["data"]
+
+
+def redeem_order_license(*, backend_url: str, license_token: str) -> dict[str, Any]:
+    redeem = request_json(
+        "POST",
+        f"{backend_url.rstrip('/')}/api/v1/buyer/orders/redeem",
+        {"license_token": license_token},
+    )
+    if not redeem["ok"]:
+        raise RuntimeError(f"redeem_order_license_failed: {redeem['data']}")
+    return redeem["data"]
+
+
+def start_order_runtime_session(
+    *,
+    backend_url: str,
+    buyer_token: str,
+    order_id: int,
+) -> dict[str, Any]:
+    response = request_json(
+        "POST",
+        f"{backend_url.rstrip('/')}/api/v1/buyer/orders/{order_id}/start-session",
+        token=buyer_token,
+        timeout=120,
+    )
+    if not response["ok"]:
+        raise RuntimeError(f"start_order_runtime_session_failed: {response['data']}")
+    return response["data"]
+
+
 def create_runtime_session(
     *,
     backend_url: str,
@@ -110,13 +149,10 @@ def create_runtime_session(
         raise RuntimeError(f"create_runtime_session_failed: {create['data']}")
 
     connect_code = str(create["data"]["connect_code"])
-    redeem = request_json(
-        "POST",
-        f"{backend_url.rstrip('/')}/api/v1/buyer/runtime-sessions/redeem",
-        {"connect_code": connect_code},
+    redeem = redeem_connect_code(
+        backend_url=backend_url,
+        connect_code=connect_code,
     )
-    if not redeem["ok"]:
-        raise RuntimeError(f"redeem_connect_code_failed: {redeem['data']}")
 
     return {
         "backend_url": backend_url,
@@ -130,12 +166,81 @@ def create_runtime_session(
         "session_mode": session_mode,
         "source_type": source_type,
         "connect_code": connect_code,
-        "session_token": str(redeem["data"]["session_token"]),
-        "relay_endpoint": str(redeem["data"]["relay_endpoint"]),
+        "session_token": str(redeem["session_token"]),
+        "relay_endpoint": str(redeem["relay_endpoint"]),
+        "gateway_required": bool(redeem.get("gateway_required")),
+        "gateway_protocol": str(redeem.get("gateway_protocol") or ""),
+        "gateway_port": redeem.get("gateway_port"),
+        "supported_features": [str(item) for item in (redeem.get("supported_features") or [])],
         "create_result": create,
-        "redeem_result": redeem,
+        "redeem_result": {"data": redeem},
         "auth": auth,
     }
+
+
+def start_licensed_shell_session(
+    *,
+    backend_url: str,
+    email: str,
+    password: str,
+    license_token: str,
+) -> dict[str, Any]:
+    auth = login_or_register(backend_url, email, password, display_name="Buyer Agent")
+    buyer_token = auth["access_token"]
+    license_info = redeem_order_license(
+        backend_url=backend_url,
+        license_token=license_token,
+    )
+    start_result = start_order_runtime_session(
+        backend_url=backend_url,
+        buyer_token=buyer_token,
+        order_id=int(license_info["order_id"]),
+    )
+    redeem = redeem_connect_code(
+        backend_url=backend_url,
+        connect_code=str(start_result["connect_code"]),
+    )
+    return {
+        "backend_url": backend_url,
+        "buyer_email": email,
+        "buyer_token": buyer_token,
+        "order_id": int(license_info["order_id"]),
+        "offer_id": int(license_info["offer_id"]),
+        "seller_node_key": str(license_info["seller_node_key"]),
+        "runtime_image": str(license_info["runtime_image_ref"]),
+        "license_token": license_token,
+        "session_id": int(start_result["session_id"]),
+        "session_mode": "shell",
+        "source_type": "licensed_order",
+        "connect_code": str(start_result["connect_code"]),
+        "session_token": str(redeem["session_token"]),
+        "relay_endpoint": str(redeem["relay_endpoint"]),
+        "gateway_required": bool(redeem.get("gateway_required")),
+        "gateway_protocol": str(redeem.get("gateway_protocol") or ""),
+        "gateway_port": redeem.get("gateway_port"),
+        "supported_features": [str(item) for item in (redeem.get("supported_features") or [])],
+        "license_result": {"data": license_info},
+        "start_result": {"data": start_result},
+        "redeem_result": {"data": redeem},
+        "auth": auth,
+    }
+
+
+def handshake_runtime_gateway(
+    *,
+    backend_url: str,
+    session_id: int,
+    session_token: str,
+) -> dict[str, Any]:
+    response = request_json(
+        "POST",
+        f"{backend_url.rstrip('/')}/api/v1/buyer/runtime-sessions/{session_id}/gateway/handshake",
+        {"session_token": session_token},
+        timeout=120,
+    )
+    if not response["ok"]:
+        raise RuntimeError(f"gateway_handshake_failed: {response['data']}")
+    return response["data"]
 
 
 def read_runtime_session(*, backend_url: str, buyer_token: str, session_id: int) -> dict[str, Any]:

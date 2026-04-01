@@ -29,7 +29,7 @@ class SellerClientApp:
         self.backend_url_var = tk.StringVar(value="http://127.0.0.1:8000")
         self.intent_var = tk.StringVar(value="我能把自己电脑性能的10%上传到平台获取收益吗")
 
-        self.registry_var = tk.StringVar(value="81.70.52.75:5000")
+        self.registry_var = tk.StringVar(value="pivotcompute.store")
         self.local_image_var = tk.StringVar(value="alpine:3.20")
         self.repository_var = tk.StringVar(value="seller/gui-alpine")
         self.remote_tag_var = tk.StringVar(value="3.20")
@@ -79,7 +79,7 @@ class SellerClientApp:
         ttk.Button(button_bar, text="安装器 Dry Run", command=self.run_installer).pack(side=tk.LEFT, padx=4)
         ttk.Button(button_bar, text="开始接入", command=self.run_onboarding).pack(side=tk.LEFT, padx=4)
         ttk.Button(button_bar, text="刷新本地配置", command=self.refresh_config).pack(side=tk.LEFT, padx=4)
-        ttk.Button(button_bar, text="配置 Registry 信任", command=self.run_registry_trust).pack(side=tk.LEFT, padx=4)
+        ttk.Button(button_bar, text="检查 Registry 连接", command=self.run_registry_trust).pack(side=tk.LEFT, padx=4)
         ttk.Button(button_bar, text="上传并上报镜像", command=self.run_push_image).pack(side=tk.LEFT, padx=4)
 
         self.log = tk.Text(frame, height=30, wrap="word")

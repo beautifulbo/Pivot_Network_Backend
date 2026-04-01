@@ -34,6 +34,7 @@ from seller_client.agent_mcp import (
     wireguard_summary,
 )
 from seller_client.installer import bootstrap_client
+from seller_client.installer import buyer_codex_server_name, codex_server_name, mcp_server_attachment_status
 from seller_client.windows_elevation import is_windows_platform
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -420,6 +421,7 @@ def _onboarding_stages(result: dict[str, Any]) -> list[dict[str, str]]:
 def _installer_stages(result: dict[str, Any]) -> list[dict[str, str]]:
     environment = result.get("environment", {})
     attach_result = result.get("attach_result", {})
+    codex_mcp_servers = dict(result.get("codex_mcp_servers") or {})
     helper_result = result.get("windows_wireguard_helper", {})
     stages = [
         _stage(
@@ -430,9 +432,17 @@ def _installer_stages(result: dict[str, Any]) -> list[dict[str, str]]:
         ),
         _stage(
             "codex_mcp",
-            "挂载 seller MCP 到 CodeX",
-            "success" if attach_result.get("ok") else "error",
-            f"配置文件：{attach_result.get('config_path') or result.get('codex_config_path')}",
+            "挂载本机 CodeX MCP 配置",
+            (
+                "success"
+                if attach_result.get("ok") and not result.get("needs_codex_mcp_attach")
+                else "warning"
+            ),
+            (
+                f"配置文件：{attach_result.get('config_path') or result.get('codex_config_path')} | "
+                f"{codex_server_name()}={bool(codex_mcp_servers.get(codex_server_name()))} | "
+                f"{buyer_codex_server_name()}={bool(codex_mcp_servers.get(buyer_codex_server_name()))}"
+            ),
         ),
     ]
 
@@ -473,14 +483,39 @@ def _installer_stages(result: dict[str, Any]) -> list[dict[str, str]]:
 
 def _registry_trust_stages(result: dict[str, Any], registry: str) -> list[dict[str, str]]:
     certificate_result = result.get("fetch_result")
-    install_result = result.get("install_result")
-    restart_result = result.get("restart_result")
-    stages = [
-        _stage_from_result("probe", "读取 Registry 证书", certificate_result, f"已获取 {registry} 的服务端证书。"),
-        _stage_from_result("install", "安装本地 Registry 信任", install_result, "Docker 信任目录已写入证书。"),
-    ]
-    if restart_result is not None:
-        stages.append(_stage_from_result("restart", "重启本地 Docker", restart_result, "Docker 已重启并重新探测。"))
+    registry_probe_result = result.get("probe_result")
+    stages: list[dict[str, str]] = []
+
+    if certificate_result and certificate_result.get("ok"):
+        trust_probe = certificate_result.get("trust_probe") or {}
+        issuer = trust_probe.get("issuer") or ()
+        issuer_text = str(issuer) if issuer else "system CA"
+        stages.append(
+            _stage(
+                "certificate",
+                "检查 Registry 证书",
+                "success",
+                f"已确认 {registry} 走公开 HTTPS 证书链，issuer={issuer_text}",
+            )
+        )
+    else:
+        stages.append(
+            _stage_from_result(
+                "certificate",
+                "检查 Registry 证书",
+                certificate_result,
+                f"{registry} 的 HTTPS 证书可被系统信任。",
+            )
+        )
+
+    stages.append(
+        _stage_from_result(
+            "registry_v2",
+            "检查 Registry /v2/ 连通性",
+            registry_probe_result,
+            f"{registry} 的 /v2/ 入口可正常访问。",
+        )
+    )
     return stages
 
 
@@ -544,30 +579,47 @@ def _readiness_checks(state_dir: str, platform: dict[str, Any]) -> list[dict[str
     base_dir = _state_dir_path(state_dir)
     config = _load_client_config(base_dir)
     environment = environment_check()
+    codex_mcp_servers = mcp_server_attachment_status()
     docker = docker_summary()
     swarm = swarm_summary()
     wireguard = wireguard_summary(state_dir=str(base_dir))
     overview = platform.get("overview") or {}
     nodes = overview.get("nodes", []) if isinstance(overview, dict) else []
+    current_node_key = _default_node_key(base_dir)
+    current_node = next((item for item in nodes if item.get("node_key") == current_node_key), None)
+    if current_node is None and nodes:
+        current_node = nodes[0]
+    platform_wireguard_ready = bool((current_node or {}).get("wireguard_ready_for_buyer"))
+    platform_wireguard_target = str((current_node or {}).get("wireguard_target") or "")
 
     checks = [
         {
             "id": "codex",
-            "label": "CodeX 入口",
+            "label": "CodeX CLI",
             "status": "success" if environment.get("codex_cli") else "warning",
             "detail": "检测到 CodeX CLI。" if environment.get("codex_cli") else "还没有检测到 CodeX CLI。",
-            "hint": "先通过安装器把 CodeX CLI 和 MCP 挂载准备好。",
+            "hint": "先安装 CodeX CLI，再通过 environment_check 把 MCP 配置挂好。",
+        },
+        {
+            "id": "codex_mcp",
+            "label": "CodeX MCP 配置",
+            "status": "success" if all(codex_mcp_servers.values()) else "warning",
+            "detail": (
+                f"{codex_server_name()}={bool(codex_mcp_servers.get(codex_server_name()))}，"
+                f"{buyer_codex_server_name()}={bool(codex_mcp_servers.get(buyer_codex_server_name()))}。"
+            ),
+            "hint": "用 environment_check/install_windows.ps1 -Apply 统一挂载 sellerNodeAgent 和 buyerRuntimeAgent；seller 侧只使用 sellerNodeAgent 做接入和上架流程。",
         },
         {
             "id": "codex_runtime",
-            "label": "平台 CodeX runtime",
+            "label": "卖家 CodeX runtime",
             "status": "success" if config.get("runtime", {}).get("codex_runtime_ready") else "warning",
             "detail": (
                 f"后端已准备 {config.get('runtime', {}).get('codex_provider') or 'CodeX'} runtime。"
                 if config.get("runtime", {}).get("codex_runtime_ready")
                 else "还没有从后端成功获取 CodeX runtime。"
             ),
-            "hint": "先登录平台，再从后端拉取 CodeX runtime bootstrap。",
+            "hint": "先登录平台，再从后端拉取卖家侧 CodeX runtime bootstrap，用它执行自然语言接入、镜像上架和节点管理。",
         },
         {
             "id": "docker_cli",
@@ -664,6 +716,17 @@ def _readiness_checks(state_dir: str, platform: dict[str, Any]) -> list[dict[str
             "status": "success" if nodes else "warning",
             "detail": "平台已经看见本机节点。" if nodes else "平台侧还没有看到本机节点。",
             "hint": "执行一次 seller onboarding，让平台记录节点、共享偏好和能力摘要。",
+        },
+        {
+            "id": "platform_wireguard_ready",
+            "label": "Buyer WireGuard target",
+            "status": "success" if platform_wireguard_ready else "warning",
+            "detail": (
+                f"平台已经确认 buyer 可用 WireGuard 目标：{platform_wireguard_target}。"
+                if platform_wireguard_ready
+                else "平台还没有看到可用的 wg-seller IPv4，buyer connect 还不会就绪。"
+            ),
+            "hint": "确保 seller 节点在 register/heartbeat 上报 interfaces.wg-seller IPv4，再刷新平台 readiness。",
         },
         {
             "id": "swarm",
@@ -810,7 +873,7 @@ def run_installer(payload: InstallerRequest) -> JSONResponse:
         title="安装器检查",
         stages=_installer_stages(result),
         result=result,
-        success_summary="本地安装器检查已完成，工作目录和 CodeX MCP 挂载位已准备。",
+        success_summary="本地安装器检查已完成，工作目录、sellerNodeAgent 和 buyerRuntimeAgent 的 CodeX MCP 挂载位已准备。",
         failure_summary="安装器检查未完成，需要先修复本机依赖入口。",
     )
     return JSONResponse(response)
@@ -917,11 +980,11 @@ def run_registry_trust(payload: RegistryTrustRequest) -> JSONResponse:
     response = _operation_payload(
         state_dir=state_dir,
         action="registry_trust",
-        title="Registry 信任配置",
-        stages=_registry_trust_stages(result, payload.registry),
+        title="Registry 连接检查",
+        stages=_registry_trust_stages(result, result.get("registry") or payload.registry),
         result=result,
-        success_summary="Registry 信任配置已执行，本机 Docker 可以继续尝试推送镜像。",
-        failure_summary="Registry 信任配置未完成，镜像推送大概率会继续失败。",
+        success_summary="Registry HTTPS 入口已确认可用，接下来可以继续推送镜像。",
+        failure_summary="Registry HTTPS 入口检查未通过，镜像推送大概率会继续失败。",
     )
     return JSONResponse(response)
 

@@ -38,7 +38,7 @@ def test_dashboard_endpoint_returns_structured_summary(monkeypatch) -> None:
                 },
                 "server": {
                     "backend_url": "http://127.0.0.1:8000",
-                    "registry": "81.70.52.75:5000",
+                    "registry": "pivotcompute.store",
                 },
                 "docker": {"last_pushed_image": "seller/demo:v1"},
                 "runtime": {
@@ -75,6 +75,11 @@ def test_dashboard_endpoint_returns_structured_summary(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         agent_server,
+        "mcp_server_attachment_status",
+        lambda config_text=None: {"sellerNodeAgent": True, "buyerRuntimeAgent": True},
+    )
+    monkeypatch.setattr(
+        agent_server,
         "docker_summary",
         lambda: {"ok": True, "info": {"stdout": "swarm_state=active control=false"}},
     )
@@ -108,7 +113,16 @@ def test_dashboard_endpoint_returns_structured_summary(monkeypatch) -> None:
             "overview": {
                 "node_count": 1,
                 "image_count": 1,
-                "nodes": [{"hostname": "seller-host", "status": "available", "shared_percent_preference": 10}],
+                "nodes": [
+                    {
+                        "node_key": "node-001",
+                        "hostname": "seller-host",
+                        "status": "available",
+                        "shared_percent_preference": 10,
+                        "wireguard_ready_for_buyer": True,
+                        "wireguard_target": "10.66.66.10",
+                    }
+                ],
                 "images": [{"repository": "seller/demo", "tag": "v1", "push_ready": True}],
             },
             "activity": [{"event_type": "node_registered"}],
@@ -127,7 +141,9 @@ def test_dashboard_endpoint_returns_structured_summary(monkeypatch) -> None:
     assert payload["summary"]["node_count"] == 1
     assert payload["summary"]["image_count"] == 1
     assert payload["summary"]["node_id"] == "node-001"
+    assert any(item["id"] == "codex_mcp" and item["status"] == "success" for item in payload["readiness"])
     assert any(item["id"] == "platform_node" and item["status"] == "success" for item in payload["readiness"])
+    assert any(item["id"] == "platform_wireguard_ready" and item["status"] == "success" for item in payload["readiness"])
 
 
 def test_onboarding_endpoint_records_local_activity(tmp_path: Path, monkeypatch) -> None:

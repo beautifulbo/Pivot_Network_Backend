@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = DEFAULT_REDIS_URL
     SWARM_DOCKER_BIN: str = "docker"
     SWARM_DOCKER_TIMEOUT_SECONDS: float = 10.0
-    SWARM_MANAGER_HOST: str = "81.70.52.75"
+    SWARM_MANAGER_HOST: str = "pivotcompute.store"
     SWARM_MANAGER_PORT: int = 2377
     OPENAI_API_KEY: str | None = None
     CODEX_AUTH_JSON_PATH: str = str(DEFAULT_CODEX_AUTH_JSON_PATH)
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     CODEX_PROVIDER_REQUIRES_OPENAI_AUTH: bool = True
     WIREGUARD_ENABLED: bool = True
     WIREGUARD_INTERFACE: str = "wg-seller"
-    WIREGUARD_ENDPOINT_HOST: str = "81.70.52.75"
+    WIREGUARD_ENDPOINT_HOST: str = "pivotcompute.store"
     WIREGUARD_ENDPOINT_PORT: int = 45182
     WIREGUARD_SERVER_PUBLIC_KEY: str = "puGAoUTF0vyha+32vxQ+BBVOWXlCOUzhFoNe5tJ9hyo="
     WIREGUARD_ALLOWED_IPS: str = "10.66.66.0/24"
@@ -64,11 +64,16 @@ class Settings(BaseSettings):
     WIREGUARD_SERVER_INTERFACE: str = "wg0"
     WIREGUARD_SERVER_CONFIG_PATH: str = "/etc/wireguard/wg0.conf"
     WIREGUARD_SERVER_SSH_ENABLED: bool = False
-    WIREGUARD_SERVER_SSH_HOST: str = "81.70.52.75"
+    WIREGUARD_SERVER_SSH_HOST: str = "pivotcompute.store"
     WIREGUARD_SERVER_SSH_PORT: int = 22
     WIREGUARD_SERVER_SSH_USER: str = "root"
     WIREGUARD_SERVER_SSH_PASSWORD: str = ""
     WIREGUARD_SERVER_SSH_KEY_PATH: str = ""
+    SESSION_GATEWAY_IMAGE: str = "python:3.12-alpine"
+    SESSION_GATEWAY_PROTOCOL: str = "http"
+    SESSION_GATEWAY_BASE_PORT: int = 20000
+    SESSION_GATEWAY_SUPPORTED_FEATURES: str = "exec,logs,shell,files"
+    SESSION_GATEWAY_HANDSHAKE_MODE: str = "session_token"
     USD_CNY_RATE: float = 7.2
     PRICING_REFERENCE_AWS_REGION: str = "us-east-1"
     PRICING_REFERENCE_AZURE_REGION: str = "eastus"
