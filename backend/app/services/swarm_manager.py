@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from textwrap import dedent
 
 import paramiko
 
 from app.core.config import Settings
+from app.services.adapter_client import AdapterClientError, adapter_enabled, adapter_request
 from app.services.session_gateway_template import build_session_gateway_script
 
 
@@ -23,6 +25,9 @@ def _task_failure_detail(task: dict[str, object]) -> str:
     if error:
         return error
     return "task failure with no state detail"
+class _LocalClient:
+    def close(self) -> None:
+        return None
 
 
 def _ssh_client(settings: Settings) -> paramiko.SSHClient:
@@ -58,7 +63,15 @@ def _ssh_client(settings: Settings) -> paramiko.SSHClient:
 
 
 def get_worker_join_token(settings: Settings) -> dict[str, object]:
-    client = _ssh_client(settings)
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(settings, method="GET", path="/swarm/worker-join-token")
+        except AdapterClientError as exc:
+            raise SwarmManagerError(f"swarm_adapter_join_token_failed: {exc}") from exc
+
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.SWARM_MANAGER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         result = _exec(client, "docker swarm join-token -q worker")
         token = str(result["stdout"]).strip()
@@ -76,7 +89,32 @@ def get_worker_join_token(settings: Settings) -> dict[str, object]:
         client.close()
 
 
-def _exec(client: paramiko.SSHClient, command: str) -> dict[str, object]:
+def _exec(client: paramiko.SSHClient | _LocalClient, command: str) -> dict[str, object]:
+    if isinstance(client, _LocalClient):
+        try:
+            result = subprocess.run(
+                ["bash", "-lc", command],
+                capture_output=True,
+                text=True,
+                timeout=90,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise SwarmManagerError("swarm_manager_local_shell_missing") from exc
+        except subprocess.TimeoutExpired:
+            return {
+                "ok": False,
+                "stdout": "",
+                "stderr": "swarm_manager_local_command_timed_out",
+                "command": command,
+            }
+        return {
+            "ok": result.returncode == 0,
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip(),
+            "command": command,
+        }
+
     stdin, stdout, stderr = client.exec_command(command, timeout=30)
     stdout_text = stdout.read().decode("utf-8", "replace").strip()
     stderr_text = stderr.read().decode("utf-8", "replace").strip()
@@ -89,7 +127,15 @@ def _exec(client: paramiko.SSHClient, command: str) -> dict[str, object]:
 
 
 def get_manager_overview(settings: Settings) -> dict[str, object]:
-    client = _ssh_client(settings)
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(settings, method="GET", path="/swarm/overview")
+        except AdapterClientError as exc:
+            raise SwarmManagerError(f"swarm_adapter_overview_failed: {exc}") from exc
+
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.SWARM_MANAGER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         swarm_info = _exec(client, "docker info --format '{{json .Swarm}}'")
         node_list = _exec(client, "docker node ls")
@@ -120,7 +166,10 @@ def get_manager_overview(settings: Settings) -> dict[str, object]:
         client.close()
 
 
-def _exec_script(client: paramiko.SSHClient, script: str) -> dict[str, object]:
+def _exec_script(client: paramiko.SSHClient | _LocalClient, script: str) -> dict[str, object]:
+    if isinstance(client, _LocalClient):
+        return _exec(client, script)
+
     stdin, stdout, stderr = client.exec_command(script, timeout=90)
     stdout_text = stdout.read().decode("utf-8", "replace").strip()
     stderr_text = stderr.read().decode("utf-8", "replace").strip()
@@ -168,7 +217,9 @@ def create_session_gateway_service(
     supported_features: list[str] | None = None,
     labels: dict[str, str] | None = None,
 ) -> dict[str, object]:
-    client = _ssh_client(settings)
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.SWARM_MANAGER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         gateway_script = build_session_gateway_script()
         supported_features_env = ",".join(supported_features or [])
@@ -237,7 +288,9 @@ def create_code_runtime_service(
     run_command: list[str] | None = None,
     labels: dict[str, str] | None = None,
 ) -> dict[str, object]:
-    client = _ssh_client(settings)
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.SWARM_MANAGER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         archive_config_name = f"{config_name}-archive"
         archive_target = "/workspace/_payload.zip"
@@ -401,7 +454,9 @@ def create_shell_runtime_service(
     entry_command: list[str],
     labels: dict[str, str] | None = None,
 ) -> dict[str, object]:
-    client = _ssh_client(settings)
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.SWARM_MANAGER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         label_args = _label_args(labels)
         script = dedent(
@@ -446,7 +501,25 @@ def validate_runtime_image_on_node(
     runtime_image: str,
     timeout_seconds: int = 120,
 ) -> dict[str, object]:
-    client = _ssh_client(settings)
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(
+                settings,
+                method="POST",
+                path="/swarm/runtime-images/validate",
+                payload={
+                    "service_name": service_name,
+                    "placement_constraint": placement_constraint,
+                    "runtime_image": runtime_image,
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+        except AdapterClientError as exc:
+            raise SwarmManagerError(f"swarm_adapter_validate_runtime_image_failed: {exc}") from exc
+
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.SWARM_MANAGER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         script = dedent(
             f"""
@@ -525,7 +598,25 @@ def probe_node_capabilities_on_node(
     probe_image: str,
     timeout_seconds: int = 180,
 ) -> dict[str, object]:
-    client = _ssh_client(settings)
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(
+                settings,
+                method="POST",
+                path="/swarm/nodes/probe",
+                payload={
+                    "service_name": service_name,
+                    "placement_constraint": placement_constraint,
+                    "probe_image": probe_image,
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+        except AdapterClientError as exc:
+            raise SwarmManagerError(f"swarm_adapter_probe_node_failed: {exc}") from exc
+
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.SWARM_MANAGER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         probe_script = dedent(
             """
@@ -662,7 +753,20 @@ def inspect_code_runtime_service(settings: Settings, *, service_name: str) -> di
 
 
 def inspect_swarm_service(settings: Settings, *, service_name: str) -> dict[str, object]:
-    client = _ssh_client(settings)
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(
+                settings,
+                method="POST",
+                path="/swarm/services/inspect",
+                payload={"service_name": service_name},
+            )
+        except AdapterClientError as exc:
+            raise SwarmManagerError(f"swarm_adapter_inspect_service_failed: {exc}") from exc
+
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.SWARM_MANAGER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         ps_result = _exec(
             client,
@@ -704,7 +808,24 @@ def remove_runtime_session_bundle(
     config_name: str,
     gateway_service_name: str | None,
 ) -> dict[str, object]:
-    client = _ssh_client(settings)
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(
+                settings,
+                method="POST",
+                path="/swarm/runtime-session-bundles/remove",
+                payload={
+                    "runtime_service_name": runtime_service_name,
+                    "config_name": config_name,
+                    "gateway_service_name": gateway_service_name,
+                },
+            )
+        except AdapterClientError as exc:
+            raise SwarmManagerError(f"swarm_adapter_remove_bundle_failed: {exc}") from exc
+
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.SWARM_MANAGER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         archive_config_name = f"{config_name}-archive"
         runtime_service_result = _exec(client, f"docker service rm {runtime_service_name}")
@@ -753,6 +874,38 @@ def create_runtime_session_bundle(
     working_dir: str | None = None,
     run_command: list[str] | None = None,
 ) -> dict[str, object]:
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(
+                settings,
+                method="POST",
+                path="/swarm/runtime-session-bundles/create",
+                payload={
+                    "session_id": session_id,
+                    "buyer_user_id": buyer_user_id,
+                    "seller_node_id": seller_node_id,
+                    "runtime_service_name": runtime_service_name,
+                    "config_name": config_name,
+                    "gateway_service_name": gateway_service_name,
+                    "gateway_port": gateway_port,
+                    "placement_constraint": placement_constraint,
+                    "runtime_image": runtime_image,
+                    "session_mode": session_mode,
+                    "entry_command": entry_command,
+                    "report_url": report_url,
+                    "session_token": session_token,
+                    "code_filename": code_filename,
+                    "code_content": code_content,
+                    "source_type": source_type,
+                    "archive_filename": archive_filename,
+                    "archive_content_base64": archive_content_base64,
+                    "working_dir": working_dir,
+                    "run_command": run_command,
+                },
+            )
+        except AdapterClientError as exc:
+            raise SwarmManagerError(f"swarm_adapter_create_bundle_failed: {exc}") from exc
+
     runtime_labels = {
         "pivot.session_id": str(session_id),
         "pivot.buyer_user_id": str(buyer_user_id),
@@ -841,6 +994,20 @@ def inspect_runtime_session_bundle(
     runtime_service_name: str,
     gateway_service_name: str | None,
 ) -> dict[str, object]:
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(
+                settings,
+                method="POST",
+                path="/swarm/runtime-session-bundles/inspect",
+                payload={
+                    "runtime_service_name": runtime_service_name,
+                    "gateway_service_name": gateway_service_name,
+                },
+            )
+        except AdapterClientError as exc:
+            raise SwarmManagerError(f"swarm_adapter_inspect_bundle_failed: {exc}") from exc
+
     runtime_result = inspect_swarm_service(settings, service_name=runtime_service_name)
     gateway_result = inspect_swarm_service(settings, service_name=gateway_service_name) if gateway_service_name else {}
     return {
