@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     SWARM_DOCKER_TIMEOUT_SECONDS: float = 10.0
     SWARM_MANAGER_HOST: str = "pivotcompute.store"
     SWARM_MANAGER_PORT: int = 2377
+    SWARM_MANAGER_LOCAL_MODE: bool = False
+    SWARM_ADAPTER_BASE_URL: str = ""
+    SWARM_ADAPTER_TOKEN: str = ""
+    SWARM_ADAPTER_TIMEOUT_SECONDS: float = 30.0
     OPENAI_API_KEY: str | None = None
     CODEX_AUTH_JSON_PATH: str = str(DEFAULT_CODEX_AUTH_JSON_PATH)
     CODEX_AUTH_JSON_FALLBACK_HOME: bool = True
@@ -63,6 +67,7 @@ class Settings(BaseSettings):
     WIREGUARD_BUYER_NETWORK_CIDR: str = "10.66.66.128/25"
     WIREGUARD_SERVER_INTERFACE: str = "wg0"
     WIREGUARD_SERVER_CONFIG_PATH: str = "/etc/wireguard/wg0.conf"
+    WIREGUARD_SERVER_LOCAL_MODE: bool = False
     WIREGUARD_SERVER_SSH_ENABLED: bool = False
     WIREGUARD_SERVER_SSH_HOST: str = "pivotcompute.store"
     WIREGUARD_SERVER_SSH_PORT: int = 22

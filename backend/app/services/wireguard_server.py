@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import base64
 import json
+import subprocess
 from textwrap import dedent
 
 import paramiko
 
 from app.core.config import Settings
+from app.services.adapter_client import AdapterClientError, adapter_enabled, adapter_request
 
 
 class WireGuardServerError(RuntimeError):
     pass
+
+
+class _LocalClient:
+    def close(self) -> None:
+        return None
 
 
 def _ssh_client(settings: Settings) -> paramiko.SSHClient:
@@ -40,7 +47,32 @@ def _ssh_client(settings: Settings) -> paramiko.SSHClient:
     return client
 
 
-def _exec(client: paramiko.SSHClient, command: str) -> dict[str, object]:
+def _exec(client: paramiko.SSHClient | _LocalClient, command: str) -> dict[str, object]:
+    if isinstance(client, _LocalClient):
+        try:
+            result = subprocess.run(
+                ["bash", "-lc", command],
+                capture_output=True,
+                text=True,
+                timeout=90,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise WireGuardServerError("wireguard_server_local_shell_missing") from exc
+        except subprocess.TimeoutExpired:
+            return {
+                "command": command,
+                "stdout": "",
+                "stderr": "wireguard_server_local_command_timed_out",
+                "ok": False,
+            }
+        return {
+            "command": command,
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip(),
+            "ok": result.returncode == 0,
+        }
+
     stdin, stdout, stderr = client.exec_command(command, timeout=30)
     stdout_text = stdout.read().decode("utf-8", "replace").strip()
     stderr_text = stderr.read().decode("utf-8", "replace").strip()
@@ -146,7 +178,24 @@ def apply_server_peer(
     client_address: str,
     persistent_keepalive: int,
 ) -> dict[str, object]:
-    client = _ssh_client(settings)
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(
+                settings,
+                method="POST",
+                path="/wireguard/peers/apply",
+                payload={
+                    "public_key": public_key,
+                    "client_address": client_address,
+                    "persistent_keepalive": persistent_keepalive,
+                },
+            )
+        except AdapterClientError as exc:
+            raise WireGuardServerError(f"wireguard_adapter_apply_failed: {exc}") from exc
+
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.WIREGUARD_SERVER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         allowed_ips = client_address
         upsert_result = _exec(
@@ -202,7 +251,20 @@ def apply_server_peer(
 
 
 def remove_server_peer(settings: Settings, *, public_key: str) -> dict[str, object]:
-    client = _ssh_client(settings)
+    if adapter_enabled(settings):
+        try:
+            return adapter_request(
+                settings,
+                method="POST",
+                path="/wireguard/peers/remove",
+                payload={"public_key": public_key},
+            )
+        except AdapterClientError as exc:
+            raise WireGuardServerError(f"wireguard_adapter_remove_failed: {exc}") from exc
+
+    client: paramiko.SSHClient | _LocalClient = (
+        _LocalClient() if settings.WIREGUARD_SERVER_LOCAL_MODE else _ssh_client(settings)
+    )
     try:
         payload = base64.b64encode(
             json.dumps({"config_path": settings.WIREGUARD_SERVER_CONFIG_PATH, "public_key": public_key}).encode("utf-8")
